@@ -6,9 +6,9 @@ from ignite.engine import Engine
 from ignite.metrics import RootMeanSquaredError, MeanAbsoluteError
 from ignite.contrib.metrics.regression.r2_score import R2Score
 
-from models.arch.Reg import Regressor
-from pca_basis import get_pca_basis
-from evaluation.metrics import ModelDistanceMetric, PearsonCorrelation, FeatureKLMetric
+from models.arch import Regressor
+from .pca_basis import get_pca_basis
+from .metrics import ModelDistanceMetric, PearsonCorrelation, FeatureKLMetric
 
 
 @dataclass

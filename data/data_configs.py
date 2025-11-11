@@ -1,1 +1,1 @@
-UTKFACE_PATH = "data/UTKface_inthewild"  
+UTKFACE_PATH = "data/UTKFace"  

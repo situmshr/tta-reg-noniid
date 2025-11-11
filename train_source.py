@@ -14,9 +14,11 @@ from ignite.engine.events import Events
 from ignite.handlers.param_scheduler import (CosineAnnealingScheduler,
                                              create_lr_scheduler_with_warmup)
 from ignite.handlers.checkpoint import ModelCheckpoint
+from ignite.metrics import Average
+import wandb
 
 from data import get_datasets
-from models.arch.Reg import create_regressor, Regressor
+from models.arch import create_regressor, Regressor
 from trainer import RegressionTrainer
 from evaluation.evaluator import RegressionEvaluator
 from handlers import EvaluationAccumulator, EvaluationRunner
@@ -27,7 +29,7 @@ def parse_args():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", required=True, help="config")
-    parser.add_argument("-o", required=True, help="output directory")
+    parser.add_argument("-o", required=True, default="outputs", help="output directory")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     pprint(vars(args))
@@ -47,6 +49,13 @@ def main(args):
     with Path(args.o, "config.yaml").open("w", encoding="utf-8") as f:
         yaml.dump(config, f)
 
+    wandb.init(
+        project="tta-reg-train-source",
+        name=Path(args.o).name,
+        config=config,
+        dir=args.o,
+    )
+
     fix_seed(args.seed)
 
     net = create_regressor(config).cuda()
@@ -54,8 +63,8 @@ def main(args):
     opt = create_optimizer(net, config)
 
     train_ds, val_ds = get_datasets(config)
-    train_dl = DataLoader(train_ds, **config["train_dataloader"])
-    val_dl = DataLoader(val_ds, **config["val_dataloader"])
+    train_dl = DataLoader(train_ds, **config["train_dataloader"], num_workers=4, pin_memory=True)
+    val_dl = DataLoader(val_ds, **config["val_dataloader"], num_workers=4, pin_memory=True)
 
     evaluator = RegressionEvaluator(net, **config["evaluator"])
 
@@ -75,9 +84,11 @@ def main(args):
     trainer.add_event_handler(Events.EPOCH_COMPLETED, train_ev_runner)
 
     trainer.add_event_handler(Events.EPOCH_COMPLETED, val_ev_runner)
+
+    model_dir = Path("models/weights", config["dataset"]["name"])
     trainer.add_event_handler(Events.COMPLETED,
-                              ModelCheckpoint(args.o, "source",
-                                              require_empty=False),
+                              ModelCheckpoint(dirname=model_dir, require_empty=False,
+                                              filename_prefix=config["regressor"]["config"]["backbone"]),
                               {"model": net})
 
     p = Path(args.o)
@@ -87,6 +98,7 @@ def main(args):
                               lambda _: train_ev_logger.get_dataframe().to_csv(str(p / "train_metrics.csv"), index=False))
     trainer.run(train_dl, max_epochs=config["epoch"])
 
+    wandb.finish()
     print("done")
 
 

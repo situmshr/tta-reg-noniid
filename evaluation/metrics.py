@@ -9,7 +9,7 @@ from ignite.exceptions import NotComputableError
 
 import numpy as np
 
-from loss import diagonal_gaussian_kl_loss
+from .loss import diagonal_gaussian_kl_loss
 
 
 class ModelDistanceMetric(Metric):

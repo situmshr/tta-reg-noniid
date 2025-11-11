@@ -35,12 +35,12 @@ class CNNRegressor(Regressor):
                     base_net, {"avgpool": "feature"})
 
             case "resnet50-GN":
-                base_net = timm.create_model("resnetv2_50d_gn.ah_in1k", pretrained=pretrained)
+                base_net = timm.create_model('resnet50_gn', pretrained=True)
                 if in_channels != 3:
                     base_net.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7,
                                                stride=2, padding=3, bias=False)
                 self.feature_extractor = create_feature_extractor(
-                    base_net, {"avgpool": "feature"})
+                    base_net, {"global_pool": "feature"})
                 
             case _:
                 raise ValueError(f"Invalid backbone: {backbone!r}")

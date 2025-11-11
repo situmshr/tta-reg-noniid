@@ -1,2 +1,10 @@
-やることリスト
-・data_configではなくhydraによる管理への変更
+コマンド一覧
+# 端末A（アーキA用・GPU0を占有）
+CUDA_VISIBLE_DEVICES=0 \
+python train_source.py -c configs/archA.yaml -o outputs/archA
+
+# 端末B（アーキB用・GPU1を占有）
+CUDA_VISIBLE_DEVICES=1 \
+python train_source.py -c configs/archB.yaml -o outputs/archB
+
+python feature_stats.py -c configs/feature_stats/utkface-Res50-BN.yaml -o models --validation --save_feature

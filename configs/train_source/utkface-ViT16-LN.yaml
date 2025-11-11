@@ -9,7 +9,7 @@ dataset:
 regressor:
   arch_type: vit
   config:
-    backbone: vit_base_patch16_224
+    backbone: vit-b-16-224-LN
     pretrained: true
     in_channels: 3
 

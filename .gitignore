@@ -10,10 +10,22 @@ wheels/
 .venv
 
 # image files
-data/UTKface_inthewild/
+data/UTKFace
+
+# train outputs
+outputs/
+models/weights/
+models/stats/
+models/features/
+
+# RADEME files
+*.md
 
 # python version
 .python-version
 
 # Cache files
 .DS_Store
+
+# in progress files
+models/arch/VBLL.py
