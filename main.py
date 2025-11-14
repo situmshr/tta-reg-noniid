@@ -16,7 +16,7 @@ from utils.seed import fix_seed
 from models.arch import create_regressor, Regressor, extract_bn_layers, extract_gn_layers
 from data import get_datasets
 from evaluation.evaluator import RegressionEvaluator
-from methods import VarianceMinimizationEM
+from methods import VarianceMinimizationEM, SignificantSubspaceAlignment, AdaptiveBatchNorm
 
 
 def load_vbll_head(config: dict[str, Any], regressor: Regressor) -> torch.nn.Module:
@@ -88,9 +88,9 @@ def main(args):
     severity = val_corruption.get("severity")
     dataset_dir = f"{dataset_name}-{severity}" if severity is not None else dataset_name
     backbone = config["regressor"]["config"]["backbone"]
-    method = tta_cfg.get("method")
-    base_mode = method is None or method == "base"
-    method_name = method if method is not None else "base"
+    raw_method = tta_cfg.get("method")
+    method_key = "base" if raw_method is None else str(raw_method).lower()
+    method_name = raw_method if raw_method is not None else "base"
 
     output_dir = Path(args.o, dataset_dir, f"{backbone}-{method_name}")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -104,10 +104,12 @@ def main(args):
     _, val_ds = get_datasets(config)
     val_dl = DataLoader(val_ds, **config["adapt_dataloader"])
 
+    trainer_cfg = config.get("trainer", {})
     engine = None
-    if not base_mode:
-        if method != "vm":
-            raise ValueError(f"Unsupported TTA method: {method!r}. Only 'vm' or 'base' are supported.")
+
+    if method_key == "base":
+        pass
+    elif method_key == "vm":
         opt = create_optimizer(regressor, config)
         vbll_head = load_vbll_head(config, regressor)
         variance_weight = tta_cfg.get("variance_weight", 1.0)
@@ -117,17 +119,40 @@ def main(args):
             opt,
             vbll_head=vbll_head,
             variance_weight=variance_weight,
-            **config["trainer"],
+            **trainer_cfg,
         )
+    elif method_key == "ssa":
+        opt = create_optimizer(regressor, config)
+        ssa_kwargs = {
+            "pc_config": tta_cfg.get("pc_config"),
+            "loss_config": tta_cfg.get("loss_config"),
+            "weight_bias": tta_cfg.get("weight_bias", 1e-6),
+            "weight_exp": tta_cfg.get("weight_exp", 1.0),
+        }
+        engine = SignificantSubspaceAlignment(
+            regressor,
+            opt,
+            **trainer_cfg,
+            **ssa_kwargs,
+        )
+    elif method_key == "adabn":
+        engine = AdaptiveBatchNorm(
+            regressor,
+            None,
+            **trainer_cfg,
+        )
+    else:
+        raise ValueError(f"Unsupported TTA method: {raw_method!r}. Supported: 'base', 'vm', 'ssa', 'adabn'.")
 
-        if args.save:
+    if args.save:
+        if engine is None:
+            torch.save(regressor.state_dict(), Path(output_dir, "regressor.pt"))
+        else:
             engine.add_event_handler(
                 Events.COMPLETED,
                 ModelCheckpoint(output_dir, "adapted", require_empty=False),
                 {"regressor": regressor},
             )
-    elif args.save:
-        torch.save(regressor.state_dict(), Path(output_dir, "regressor.pt"))
 
     reg_evaluator = RegressionEvaluator(regressor, **config["evaluator"])
 
