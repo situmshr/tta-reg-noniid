@@ -53,7 +53,8 @@ def main(args):
     print("run calculator", flush=True)
     calc.run(dl)
 
-    mean, cov, features = calc.compute_stats()
+    mean, cov, features, labels = calc.compute_stats()
+    feat_labels = torch.cat([features, labels.unsqueeze(1)], dim=1)
     cov_np = cov.numpy()
     eigvals, eigvecs = np.linalg.eigh(cov_np)
 
@@ -69,10 +70,10 @@ def main(args):
     }, str(p))
 
     if args.save_feature:
-        feature_dir = Path(args.o, "features", config["dataset"]["name"])
+        feature_dir = Path(args.o, "valid_features", config["dataset"]["name"])
         feature_dir.mkdir(parents=True, exist_ok=True)
         p = Path(feature_dir, config["regressor"]["config"]["backbone"]+".pt")
-        torch.save(features, str(p))
+        torch.save(feat_labels, str(p))
         print("feature saved")
 
 
@@ -98,26 +99,29 @@ class FeatureStatCalculator(Engine):
 
     def reset(self):
         self._features = []
+        self._labels = []
 
     @torch.no_grad()
     def inference(self, engine: Engine, batch: tuple[Tensor, Tensor]):
         self.regressor.eval()
 
-        x, _ = batch
+        x, y = batch
         x = x.cuda()
 
         feat = self.regressor_feature(x)    # (B,D)
         self._features.append(feat.cpu())
+        self._labels.append(y.cpu())
 
-    def compute_stats(self, ddof: int = 1) -> tuple[Tensor, Tensor, Tensor]:
+    def compute_stats(self, ddof: int = 1) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         assert len(self._features) >= 1, "no data accumulated"
 
         features = torch.cat(self._features)
+        labels = torch.cat(self._labels)
         mean = features.mean(dim=0)
         features_c = features - mean    # (B,D)
         cov = features_c.T @ features_c / (features.shape[0] - ddof)
 
-        return mean, cov, features
+        return mean, cov, features, labels
 
 
 if __name__ == "__main__":

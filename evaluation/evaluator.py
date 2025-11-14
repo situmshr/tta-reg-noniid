@@ -3,7 +3,7 @@ from dataclasses import dataclass, InitVar
 import torch
 from torch import Tensor
 from ignite.engine import Engine
-from ignite.metrics import RootMeanSquaredError, MeanAbsoluteError
+from ignite.metrics import RootMeanSquaredError, MeanAbsoluteError, Average
 from ignite.contrib.metrics.regression.r2_score import R2Score
 
 from models.arch import Regressor
@@ -91,3 +91,53 @@ class RegressionEvaluator(Engine):
         if self.mean is not None:
             output["feat_pc"] = (feature - self.mean) @ self.pc_basis
         return output
+    
+
+@dataclass
+class VBLLEvaluator(Engine):
+    vbll_head: torch.nn.Module
+
+    def __post_init__(self):
+        super().__init__(self.inference)
+
+        RootMeanSquaredError(
+            output_transform=lambda out: (out["y_pred"], out["y"])
+        ).attach(self, "rmse")
+        MeanAbsoluteError(
+            output_transform=lambda out: (out["y_pred"], out["y"])
+        ).attach(self, "mae")
+        R2Score(
+            output_transform=lambda out: (out["y_pred"], out["y"])
+        ).attach(self, "R2")
+        PearsonCorrelation(
+            output_transform=lambda out: (out["y_pred"], out["y"])
+        ).attach(self, "r")
+
+        Average(
+            output_transform=lambda out: out["nll"]
+        ).attach(self, "nll")
+        Average(
+            output_transform=lambda out: out["y_var"]
+        ).attach(self, "var")
+
+    @torch.no_grad()
+    def inference(self,
+                  engine: Engine,
+                  batch: tuple[Tensor, Tensor]) -> dict[str, Tensor]:
+        self.vbll_head.eval()
+
+        x, y = batch
+        x = x.cuda()
+        y = y.float().flatten().cuda()
+
+        vbll_out = self.vbll_head(x)
+        preds = vbll_out.predictive.mean.view_as(y)
+        vars = vbll_out.predictive.variance.mean()
+        nll = -vbll_out.predictive.log_prob(y.view(-1, 1)).mean()
+
+        return {
+            "y_pred": preds,
+            "y_var": vars,
+            "nll": nll,
+            "y": y
+        }

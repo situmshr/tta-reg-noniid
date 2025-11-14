@@ -17,6 +17,15 @@ outputs/
 models/weights/
 models/stats/
 models/features/
+models/train_features/
+models/valid_features/
+*.pt
+
+# config files
+*.yaml
+
+# shell scripts
+*.sh
 
 # RADEME files
 *.md

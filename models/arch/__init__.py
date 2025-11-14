@@ -2,14 +2,19 @@ from typing import Any
 
 from .Reg import Regressor
 
-from .Res import CNNRegressor
+from .Res import CNNRegressor, extract_bn_layers, extract_gn_layers
 from .ViT import ViTRegressor
+from .VBLL import ModelWithVBLLHead, create_vbll_head
 
 __all__ = [
     "Regressor",
     "create_regressor",
     "CNNRegressor",
     "ViTRegressor",
+    "ModelWithVBLLHead",
+    "create_vbll_head",
+    "extract_bn_layers",
+    "extract_gn_layers",
 ]
 
 

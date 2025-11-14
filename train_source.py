@@ -4,6 +4,7 @@ from pathlib import Path
 from pprint import pprint
 import copy
 import sys
+import argparse
 
 import yaml
 
@@ -26,7 +27,6 @@ from utils.seed import fix_seed
 
 
 def parse_args():
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", required=True, help="config")
     parser.add_argument("-o", required=True, default="outputs", help="output directory")

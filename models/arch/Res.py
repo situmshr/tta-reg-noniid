@@ -3,10 +3,11 @@ from collections.abc import Iterator
 
 from torch import nn, Tensor
 from torch.nn.modules.batchnorm import _BatchNorm
-from torch.nn.modules.normalization import GroupNorm
+from torch.nn.modules.normalization import GroupNorm as TorchGroupNorm
 from torchvision.models import resnet50, ResNet50_Weights
 from torchvision.models.feature_extraction import create_feature_extractor
 import timm
+from timm.layers.norm import GroupNorm as TimmGroupNorm
 
 from .Reg import Regressor
 
@@ -35,12 +36,15 @@ class CNNRegressor(Regressor):
                     base_net, {"avgpool": "feature"})
 
             case "resnet50-GN":
-                base_net = timm.create_model('resnet50_gn', pretrained=True)
+                base_net = timm.create_model("resnet50_gn", pretrained=True)
                 if in_channels != 3:
                     base_net.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7,
                                                stride=2, padding=3, bias=False)
                 self.feature_extractor = create_feature_extractor(
-                    base_net, {"global_pool": "feature"})
+                    base_net,
+                    {"global_pool": "feature"},
+                    tracer_kwargs={"leaf_modules": [TimmGroupNorm]},
+                )
                 
             case _:
                 raise ValueError(f"Invalid backbone: {backbone!r}")
@@ -70,9 +74,10 @@ def extract_bn_layers(mod: nn.Module) -> Iterator[_BatchNorm]:
         else:
             yield from extract_bn_layers(m)
 
-def extract_gn_layers(mod: nn.Module) -> Iterator[GroupNorm]:
+def extract_gn_layers(mod: nn.Module) -> Iterator[nn.Module]:
+    gn_types = (TorchGroupNorm, TimmGroupNorm)
     for m in mod.children():
-        if isinstance(m, GroupNorm):
+        if isinstance(m, gn_types):
             yield m
         else:
             yield from extract_gn_layers(m)
