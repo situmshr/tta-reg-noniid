@@ -24,8 +24,13 @@ models/valid_features/
 # config files
 *.yaml
 
+# check files
+check_*.py
+plot_loglik*.py
+
 # shell scripts
 *.sh
+run_*.py
 
 # RADEME files
 *.md
@@ -38,3 +43,4 @@ models/valid_features/
 
 # in progress files
 models/arch/VBLL.py
+data/seq_non_iid.py

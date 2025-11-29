@@ -3,6 +3,9 @@ from typing import Any
 from torch.utils.data import Dataset
 
 from .utkface import get_utkface
+from .non_iid import get_note_non_iid_dataset
+
+__all__ = ["get_datasets", "get_note_non_iid_dataset"]
 
 
 def get_datasets(config: dict[str, Any]) -> tuple[Dataset, Dataset]:

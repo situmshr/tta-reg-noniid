@@ -66,12 +66,6 @@ def main(args):
     train_dl = DataLoader(train_ds, **config["train_dataloader"], num_workers=4, pin_memory=True)
     val_dl = DataLoader(val_ds, **config["val_dataloader"], num_workers=4, pin_memory=True)
 
-    evaluator = RegressionEvaluator(net, **config["evaluator"])
-
-    val_ev_logger = EvaluationAccumulator()
-    val_ev_runner = EvaluationRunner(
-        evaluator, val_dl, "val_" + config["dataset"]["name"], val_ev_logger)
-
     trainer = RegressionTrainer(net, opt, **config["trainer"])
 
     if "scheduler" in config["optimizer"]:
@@ -80,9 +74,16 @@ def main(args):
 
     train_ev_logger = EvaluationAccumulator()
     train_ev_runner = EvaluationRunner(
-        trainer, train_dl, "train_" + config["dataset"]["name"], train_ev_logger, run_evaluator=False)
-    trainer.add_event_handler(Events.EPOCH_COMPLETED, train_ev_runner)
+        trainer, train_dl, "train_" + config["dataset"]["name"], train_ev_logger, run_evaluator=False
+    )
 
+    evaluator = RegressionEvaluator(net, **config["evaluator"])
+
+    val_ev_logger = EvaluationAccumulator()
+    val_ev_runner = EvaluationRunner(
+        evaluator, val_dl, "val_" + config["dataset"]["name"], val_ev_logger)
+    
+    trainer.add_event_handler(Events.EPOCH_COMPLETED, train_ev_runner)
     trainer.add_event_handler(Events.EPOCH_COMPLETED, val_ev_runner)
 
     model_dir = Path("models/weights", config["dataset"]["name"])
