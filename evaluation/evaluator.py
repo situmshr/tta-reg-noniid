@@ -24,7 +24,8 @@ class RegressionEvaluator(Engine):
                       compile_model: dict | None):
         super().__init__(self.inference)
 
-        y_ot = lambda d: (d["y_pred"], d["y"])
+        y_ot = lambda d: (d["y_pred"].reshape(-1), d["y"].reshape(-1))
+
         RootMeanSquaredError(y_ot).attach(self, "rmse_loss")
         MeanAbsoluteError(y_ot).attach(self, "mae_loss")
         R2Score(y_ot).attach(self, "R2")
@@ -78,7 +79,7 @@ class RegressionEvaluator(Engine):
 
         x, y = batch
         x = x.cuda()
-        y = y.float().flatten().cuda()
+        y = y.float().cuda()
 
         feature = self.feature_extractor(x)
         y_pred = self.net.predict_from_feature(feature)

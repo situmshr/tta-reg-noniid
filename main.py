@@ -14,7 +14,7 @@ from ignite.handlers import ModelCheckpoint
 
 from utils.seed import fix_seed
 from models.arch import create_regressor, Regressor, extract_bn_layers, extract_gn_layers
-from data import get_datasets, get_note_non_iid_dataset
+from data import get_datasets, get_non_iid_dataset
 from evaluation.evaluator import RegressionEvaluator
 from methods import (
     VarianceMinimizationEM,
@@ -97,11 +97,37 @@ def main(args):
     dataset_cfg = config["dataset"]
     dataset_name = dataset_cfg["name"]
     data_stream_cfg = dataset_cfg.get("data_stream") or {}
-    base_stream_type = (data_stream_cfg.get("type") or "iid").lower()
-    stream_type = base_stream_type
-    beta = data_stream_cfg.get("beta")
-    if base_stream_type == "non_iid" and beta is not None:
-        stream_type = f"non_iid-{beta}"
+    stream_type = (data_stream_cfg.get("type") or "iid").lower()
+    stream_label = stream_type
+    non_iid_kwargs: dict[str, Any] | None = None
+    if stream_type == "non_iid":
+        cycles = data_stream_cfg.get("cycles")
+        if cycles is None:
+            cycles = data_stream_cfg.get("period", 1)
+
+        sigma = data_stream_cfg.get("sigma")
+        if sigma is None:
+            sigma = data_stream_cfg.get("sigma_label")
+        if sigma is None:
+            sigma = data_stream_cfg.get("beta", 1.0)
+
+        non_iid_kwargs = {
+            "mode": data_stream_cfg.get("mode", "linear"),
+            "sigma": sigma,
+            "cycles": cycles,
+            "length": data_stream_cfg.get("length"),
+            "seed": data_stream_cfg.get("seed", args.seed),
+        }
+        stream_parts = ["non_iid", non_iid_kwargs["mode"]]
+        if sigma is not None:
+            stream_parts.append(f"sigma{sigma}")
+        if cycles not in (None, 1):
+            stream_parts.append(f"cycles{cycles}")
+        stream_label = "-".join(map(str, stream_parts))
+    elif stream_type != "iid":
+        raise ValueError(
+            f"Unsupported data stream type: {stream_type!r}. Use 'iid' or 'non_iid'."
+        )
     val_corruption = dataset_cfg.get("val_corruption") or {}
     severity = val_corruption.get("severity")
     dataset_dir = f"{dataset_name}-{severity}" if severity is not None else dataset_name
@@ -113,7 +139,7 @@ def main(args):
 
     if corruption_name is not None and severity is not None:
         dataset_dir = f"{dataset_name}-{corruption_name}-{severity}"
-    output_dir = Path(args.o, stream_type, dataset_dir, f"{backbone}-{method_name}")
+    output_dir = Path(args.o, stream_label, dataset_dir, f"{backbone}-{method_name}")
     output_dir.mkdir(parents=True, exist_ok=True)
     with Path(output_dir, "config.yaml").open("w", encoding="utf-8") as f:
         yaml.dump(config, f)
@@ -124,26 +150,9 @@ def main(args):
 
     _, val_ds = get_datasets(config)
 
-    if base_stream_type == "non_iid":
-        required_keys = ("num_chunks", "beta", "min_chunk_size", "num_bins")
-        missing = [k for k in required_keys if k not in data_stream_cfg]
-        if missing:
-            raise ValueError(
-                "Missing non_iid data stream settings: " + ", ".join(missing)
-            )
-
-        stream_kwargs = {k: data_stream_cfg[k] for k in required_keys}
-        if "seed" in data_stream_cfg:
-            stream_kwargs["seed"] = data_stream_cfg["seed"]
-        else:
-            stream_kwargs["seed"] = args.seed
-
-        print(f"Applying non-iid data stream: {stream_kwargs}")
-        val_ds = get_note_non_iid_dataset(val_ds, **stream_kwargs)
-    elif stream_type != "iid":
-        raise ValueError(
-            f"Unsupported data stream type: {stream_type!r}. Use 'iid' or 'non_iid'."
-        )
+    if stream_type == "non_iid":
+        print(f"Applying non-iid data stream: {non_iid_kwargs}")
+        val_ds = get_non_iid_dataset(val_ds, **(non_iid_kwargs or {}))
     val_dl = DataLoader(val_ds, **config["adapt_dataloader"])
 
     if args.viz_label_stream:

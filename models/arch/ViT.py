@@ -17,8 +17,9 @@ class ViTRegressor(Regressor):
     """
 
     def __init__(self, backbone: str, pretrained: bool, in_channels: int,
-                 global_pool: str = "avg") -> None:
+                 global_pool: str = "avg", out_dim: int = 1) -> None:
         super().__init__()
+        self.out_dim = out_dim
 
         match backbone:
             case "vit-b-16-224-LN":
@@ -39,7 +40,7 @@ class ViTRegressor(Regressor):
             case _:
                 raise ValueError(f"Invalid backbone: {backbone!r}")
 
-        self.regressor = nn.Linear(768, 1)
+        self.regressor = nn.Linear(768, out_dim)
 
     def feature(self, x: Tensor) -> Tensor:
         z: Tensor = self.feature_extractor(x)["feature"]
@@ -47,7 +48,7 @@ class ViTRegressor(Regressor):
 
     def predict_from_feature(self, z: Tensor) -> Tensor:
         y_pred: Tensor = self.regressor(z)
-        return y_pred.flatten()
+        return y_pred
 
     def get_regressor(self) -> nn.Module:
         return self.regressor

@@ -11,6 +11,8 @@ wheels/
 
 # image files
 data/UTKFace
+data/BiwiKinect
+data/BiwiKinect.tar
 
 # train outputs
 outputs/

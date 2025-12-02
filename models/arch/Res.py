@@ -14,8 +14,9 @@ from .Reg import Regressor
 
 
 class CNNRegressor(Regressor):
-    def __init__(self, backbone: str, pretrained: bool, in_channels: int):
+    def __init__(self, backbone: str, pretrained: bool, in_channels: int, out_dim: int = 1):
         super().__init__()
+        self.out_dim = out_dim
 
         match backbone:
             case "resnet26-BN":
@@ -49,7 +50,7 @@ class CNNRegressor(Regressor):
             case _:
                 raise ValueError(f"Invalid backbone: {backbone!r}")
 
-        self.regressor = nn.Linear(2048, 1)
+        self.regressor = nn.Linear(2048, out_dim)
 
     def feature(self, x: Tensor) -> Tensor:
         z: Tensor = self.feature_extractor(x)["feature"]
@@ -57,7 +58,7 @@ class CNNRegressor(Regressor):
 
     def predict_from_feature(self, z: Tensor) -> Tensor:
         y_pred: Tensor = self.regressor(z)
-        return y_pred.flatten()
+        return y_pred
 
     def get_regressor(self) -> nn.Module:
         return self.regressor

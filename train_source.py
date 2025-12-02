@@ -87,6 +87,10 @@ def main(args):
     trainer.add_event_handler(Events.EPOCH_COMPLETED, val_ev_runner)
 
     model_dir = Path("models/weights", config["dataset"]["name"])
+    gender = config["dataset"]["config"].get("gender")
+    if gender is not None:
+        model_dir = model_dir / gender
+
     trainer.add_event_handler(Events.COMPLETED,
                               ModelCheckpoint(dirname=model_dir, require_empty=False,
                                               filename_prefix=config["regressor"]["config"]["backbone"]),

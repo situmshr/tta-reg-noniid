@@ -12,6 +12,7 @@ regressor:
     backbone: resnet50-GN
     pretrained: true
     in_channels: 3
+    out_dim: 1
 
 optimizer:
   param: all

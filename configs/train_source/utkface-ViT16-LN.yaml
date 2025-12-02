@@ -12,6 +12,7 @@ regressor:
     backbone: vit-b-16-224-LN
     pretrained: true
     in_channels: 3
+    out_dim: 1
 
 optimizer:
   param: all

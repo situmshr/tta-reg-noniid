@@ -1,151 +1,141 @@
-"""Dataset loader for the Biwi Kinect head pose dataset."""
-
-from __future__ import annotations
-
-from dataclasses import dataclass
 from pathlib import Path
-import io
 import json
-import re
 import tarfile
+import io
+import re
 
-import numpy as np
-import pandas as pd
-from PIL import Image
 from torchvision.transforms import v2 as transforms
 
-from .dataset_config import BIWI_PATH, PACKAGE_ROOT
-from .image_utils import ImageDataset, ImageSubset, ImageTransformDataset, random_split
+import pandas as pd
+import numpy as np
+from PIL import Image
 
+from .data_configs import BIWI_PATH
+from .image_utils import (ImageDataset, ImageTransformDataset, ImageSubset,
+                          random_split)
 
-_TAR_ROOT = "biwi-kinect-head-pose-database"
-
-
-def _load_metadata(tar: tarfile.TarFile, gender_filter: list[str]) -> pd.DataFrame:
-    records = {
-        "person": [],
-        "frame": [],
-        "yaw": [],
-        "roll": [],
-        "pitch": [],
-    }
-
-    members = [m.name for m in tar.getmembers() if m.isfile()]
-    for person in gender_filter:
-        pose_paths = (
-            m
-            for m in members
-            if re.search(rf"faces_0/{person}/frame_\\d+_pose.txt", m)
-        )
-        for pose_path in pose_paths:
-            file_obj = tar.extractfile(pose_path)
-            if file_obj is None:
-                continue
-            with file_obj:
-                lines = file_obj.read().decode("utf-8").strip().split("\n")
-
-            rot_matrix = np.array([[float(x) for x in line.split()] for line in lines[:3]])
-            yaw, roll, pitch = _matrix_to_angles(rot_matrix)
-
-            frame = pose_path.split("/")[-1].split("_")[1]
-            records["person"].append(person)
-            records["frame"].append(frame)
-            records["yaw"].append(yaw)
-            records["roll"].append(roll)
-            records["pitch"].append(pitch)
-
-    return pd.DataFrame(records)
-
-
-def _matrix_to_angles(matrix: np.ndarray) -> tuple[float, float, float]:
-    yaw = np.arctan2(matrix[1, 0], matrix[0, 0])
-    roll = np.arctan2(-matrix[2, 0], np.sqrt(matrix[2, 1] ** 2 + matrix[2, 2] ** 2))
-    pitch = np.arctan2(matrix[2, 1], matrix[2, 2])
-    return yaw, roll, pitch
-
-
-@dataclass
-class BiwiSample:
-    person: str
-    frame: str
-    target: float
 
 
 class BiwiKinect(ImageDataset):
-    """Regression dataset for Biwi Kinect head pose estimation."""
-
-    def __init__(self, gender: str, target: str):
-        if target not in {"yaw", "pitch", "roll"}:
-            raise ValueError("target must be one of 'yaw', 'pitch', or 'roll'")
-
-        tar_path = Path(BIWI_PATH, f"{_TAR_ROOT}.tar")
-        if not tar_path.exists():
-            raise FileNotFoundError(
-                f"Biwi archive not found at {tar_path}. Set BIWI_PATH env var to override."
-            )
-
-        self.tar = tarfile.open(tar_path)
+    # targetをリストでも受け取れるように変更し、sequential引数を追加
+    def __init__(self, gender: str, target: str | list[str], sequential: bool = False):
+        # targetが文字列の場合はリストに変換して統一的な処理を可能にする
+        if isinstance(target, str):
+            target = [target]
+        for t in target:
+            assert t in ("yaw", "pitch", "roll")
         self.target = target
 
-        gender_json = Path(BIWI_PATH, "gender.json")
-        if not gender_json.exists():
+        dir_path = Path(BIWI_PATH)
+        self.root_dir: Path | None = None
+
+
+        if dir_path.exists():
+            self.root_dir = dir_path
+        else:
             raise FileNotFoundError(
-                f"Gender split file not found at {gender_json}."
+                f"Biwi data not found. Extracted directory at {dir_path}."
             )
 
-        with gender_json.open("r", encoding="utf-8") as f:
-            gender_map: dict[str, list[str]] = json.load(f)
+        with Path(BIWI_PATH, "gender.json").open("r", encoding="utf-8") as f:
+            person_dirs: str = json.load(f)[gender]
 
-        people = gender_map.get(gender)
-        if not people:
-            raise KeyError(f"Gender '{gender}' not found in gender.json")
+        df = {
+            "person": [],
+            "frame": [],
+            "yaw": [],
+            "roll": [],
+            "pitch": []
+        }
 
-        self.metadata = _load_metadata(self.tar, people)
+
+        assert self.root_dir is not None
+        for person in person_dirs:
+            person_dir = self.root_dir / "faces_0" / person
+            if not person_dir.exists():
+                raise FileNotFoundError(f"Person directory not found: {person_dir}")
+
+            for pose_file in sorted(person_dir.glob("frame_*_pose.txt")):
+                with pose_file.open("r", encoding="utf-8") as f:
+                    lines = f.read().strip().split("\n")
+
+                rot_matrix = np.array([
+                    [float(x) for x in line.strip().split(" ")]
+                    for line in lines[:3]
+                ])
+
+                frame = pose_file.name.split("_")[1]
+
+                y, r, p_ = matrix_to_angles(rot_matrix)
+                df["person"].append(person)
+                df["frame"].append(frame)
+                df["yaw"].append(y)
+                df["roll"].append(r)
+                df["pitch"].append(p_)
+
+        self.metadata = pd.DataFrame(df)
+
+        # sequential=Trueの場合、人物IDとフレーム番号順にデータをソートする
+        if sequential:
+            self.metadata["frame_int"] = self.metadata["frame"].astype(int)
+            self.metadata = self.metadata.sort_values(by=["person", "frame_int"]).reset_index(drop=True)
+            del self.metadata["frame_int"]
 
     def __len__(self) -> int:
         return len(self.metadata)
 
-    def __getitem__(self, index: int):
-        row = self.metadata.iloc[index]
-        target_value = float(row[self.target])
+    def __getitem__(self, i: int) -> tuple[Image.Image, np.ndarray]: # type: ignore
+        metadata = self.metadata.iloc[i].to_dict()
+        # 指定された複数のターゲットの値をリストで取得し、numpy配列として返す
+        y = np.array([metadata[t] for t in self.target], dtype=np.float32)
+        # targetが1つの場合でも形状を維持するか、squeezeするかは下流のタスクに依存しますが、ここでは配列として返します
 
-        img_path = f"{_TAR_ROOT}/faces_0/{row['person']}/frame_{row['frame']}_rgb.png"
-        file_obj = self.tar.extractfile(img_path)
-        if file_obj is None:
-            raise FileNotFoundError(f"Frame not found inside archive: {img_path}")
+        assert self.root_dir is not None
+        img_file = self.root_dir / "faces_0" / metadata["person"] / f"frame_{metadata['frame']}_rgb.png"
+        if not img_file.exists():
+            raise FileNotFoundError(f"Frame not found: {img_file}")
+        img = Image.open(img_file).convert("RGB")
 
-        with io.BytesIO(file_obj.read()) as bio:
-            image = Image.open(bio).convert("RGB")
+        w, h = img.width, img.height
+        c = (w - h) // 2
+        img = img.crop((c, 0, w - c, h))
 
-        width, height = image.width, image.height
-        pad = (width - height) // 2
-        if pad > 0:
-            image = image.crop((pad, 0, width - pad, height))
+        return img, y
 
-        return image, target_value
 
-    def close(self) -> None:
-        self.tar.close()
+def matrix_to_angles(m: np.ndarray) -> tuple[float, float, float]:
+    y = np.arctan2(m[1, 0], m[0, 0])
+    r = np.arctan2(-m[2, 0], np.sqrt(m[2, 1] * m[2, 1] + m[2, 2] * m[2, 2]))
+    p = np.arctan2(m[2, 1], m[2, 2])
+    return y, r, p
 
 
 class BiwiKinectClassification(BiwiKinect):
     def __init__(self, n_bins: int, gender: str, target: str):
         super().__init__(gender, target)
+
         self.n_bins = n_bins
 
-    def __getitem__(self, index: int):
-        image, angle = super().__getitem__(index)
-        max_rad = np.deg2rad(60)
-        min_rad = -max_rad
-        bin_idx = np.clip((angle - min_rad) * self.n_bins / (max_rad - min_rad), 0, self.n_bins - 1)
-        return image, int(bin_idx)
+    def __getitem__(self, i: int) -> tuple[Image.Image, int]: # type: ignore
+        x, y = super().__getitem__(i)
+
+        MAX_RAD = 60 * np.pi / 180
+        MIN_RAD = -60 * np.pi / 180
+
+        # 分類タスクの場合は単一ターゲットが前提となることが多いため、最初の要素を取得する形に修正
+        if isinstance(y, np.ndarray) and y.size > 1:
+            y = y[0] 
+
+        y = np.clip((y - MIN_RAD) * self.n_bins /
+                    (MAX_RAD - MIN_RAD), 0, self.n_bins)
+        return x, int(y)
 
 
-def get_biwi_kinect(config: dict, apply_to_tensor: bool = True, classification: bool = False):
+def get_biwi_kinect(config: dict, apply_to_tensor: bool = True, classification: bool = False) -> tuple[ImageDataset, ImageDataset]:
     if apply_to_tensor:
         to_tensor = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         ])
     else:
         to_tensor = transforms.ToTensor()
@@ -153,42 +143,40 @@ def get_biwi_kinect(config: dict, apply_to_tensor: bool = True, classification: 
     val_transform = transforms.Compose([
         transforms.Resize((256, 256)),
         transforms.CenterCrop((224, 224)),
-        to_tensor,
+        to_tensor
     ])
 
-    dataset_cfg = config.get("dataset", {})
-    if dataset_cfg.get("train_aug", True):
+    if config["dataset"].get("train_aug", True):
         train_transform = transforms.Compose([
             transforms.Resize((256, 256)),
             transforms.RandomCrop((224, 224)),
             transforms.ColorJitter(0.3, 0.3, 0.3, 0.3),
-            to_tensor,
+            to_tensor
         ])
     else:
         train_transform = val_transform
 
-    dataset_cls = BiwiKinectClassification if classification else BiwiKinect
-    dataset = dataset_cls(**dataset_cfg.get("config", {}))
+    if classification:
+        ds = BiwiKinectClassification(**config["dataset"]["config"])
+    else:
+        ds = BiwiKinect(**config["dataset"]["config"])
 
-    if (val_indices_path := dataset_cfg.get("val_indices")) is not None:
-        path = Path(val_indices_path)
-        if not path.is_absolute():
-            path = (PACKAGE_ROOT.parent / path).resolve()
-        val_indices = np.load(path)
-        print(f"BiwiKinect: load val indices from {path}")
+    if "val_indices" in config["dataset"]:
+        val_indices: np.ndarray = np.load(config["dataset"]["val_indices"])
+        print(
+            f"BiwiKinect: load val indices from {config['dataset']['val_indices']}")
 
-        mask = np.ones(len(dataset), dtype=bool)
-        mask[val_indices] = False
-        train_indices = np.arange(len(dataset))[mask]
+        train_mask = np.ones(len(ds), dtype=np.bool_)
+        train_mask[val_indices] = False
+        train_indices = np.arange(len(ds))[train_mask]
 
-        train_ds = ImageSubset(dataset, train_indices.tolist())
-        val_ds = ImageSubset(dataset, val_indices.tolist())
+        train_ds = ImageSubset(ds, train_indices.tolist())
+        val_ds = ImageSubset(ds, val_indices.tolist())
     else:
         print("BiwiKinect: split randomly")
-        train_count = int(len(dataset) * dataset_cfg.get("train_ratio", 0.8))
-        train_ds, val_ds = random_split(dataset, train_count)
+        n = int(len(ds) * config["dataset"]["train_ratio"])
+        train_ds, val_ds = random_split(ds, n)
 
     train_ds = ImageTransformDataset(train_ds, train_transform)
     val_ds = ImageTransformDataset(val_ds, val_transform)
-
     return train_ds, val_ds
