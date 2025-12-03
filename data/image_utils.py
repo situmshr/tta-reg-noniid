@@ -19,7 +19,7 @@ class ImageDataset(Dataset):
     def __len__(self) -> int:
         raise NotImplementedError
 
-    def __getitem__(self, i: int) -> tuple[Any, float]:
+    def __getitem__(self, i: int) -> tuple[Any, float | np.ndarray]:
         raise NotImplementedError
 
 
@@ -33,7 +33,7 @@ class ImageTransformDataset(ImageDataset):
     def __len__(self) -> int:
         return len(self.dataset)
 
-    def __getitem__(self, i: int) -> tuple[Tensor, float]:
+    def __getitem__(self, i: int) -> tuple[Tensor, float | np.ndarray]:
         img, label = self.dataset[i]
         img = self.transform(img)
         return img, label
@@ -44,7 +44,7 @@ class ImageSubset(ImageDataset):
         self.dataset = dataset
         self.indices = indices
 
-    def __getitem__(self, i: int) -> tuple[Any, float]:
+    def __getitem__(self, i: int) -> tuple[Any, float | np.ndarray]:
         return self.dataset[self.indices[i]]
 
     def __len__(self) -> int:
