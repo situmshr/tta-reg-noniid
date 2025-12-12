@@ -15,6 +15,7 @@ from ignite.handlers import ModelCheckpoint
 from utils.seed import fix_seed
 from models.arch import create_regressor, Regressor, extract_bn_layers, extract_gn_layers
 from data import get_datasets, get_non_iid_dataset
+from data.image_utils import ImageSubset
 from evaluation.evaluator import RegressionEvaluator
 from methods import (
     VarianceMinimizationEM,
@@ -91,6 +92,7 @@ def main(args):
             config = json.load(f)
         else:
             config = yaml.safe_load(f)
+    config["seed"] = args.seed
     pprint(config)
 
     tta_cfg = config.get("tta") or {}
@@ -139,7 +141,14 @@ def main(args):
 
     if corruption_name is not None and severity is not None:
         dataset_dir = f"{dataset_name}-{corruption_name}-{severity}"
-    output_dir = Path(args.o, stream_label, dataset_dir, f"{backbone}-{method_name}")
+    seed_label = f"seed{args.seed}"
+    if dataset_name == "utkface":
+        output_dir = Path(args.o, stream_label, dataset_dir, f"{backbone}-{method_name}", seed_label)
+    elif dataset_name == "biwi_kinect":
+        gender = config["dataset"]["config"].get("gender")
+        output_dir = Path(args.o, dataset_dir, gender, f"{backbone}-{method_name}", seed_label)
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset_name!r}")
     output_dir.mkdir(parents=True, exist_ok=True)
     with Path(output_dir, "config.yaml").open("w", encoding="utf-8") as f:
         yaml.dump(config, f)
@@ -158,9 +167,16 @@ def main(args):
     if args.viz_label_stream:
         visualize_label_stream(val_dl, Path(output_dir, "val_label_stream.png"))
 
-    
+    trainer_cfg = dict(config.get("trainer", {}))
+    trainer_cfg.setdefault("val_dataset", val_ds)
+    eval_cfg = dict(config.get("evaluator", {}))
+    eval_cfg.setdefault("val_dataset", val_ds)
+    # Optional: also pass explicit target names from dataset config for clarity
+    ds_targets = (dataset_cfg.get("config", {}) or {}).get("target")
+    if ds_targets is not None:
+        eval_cfg.setdefault("target_names", ds_targets)
+        trainer_cfg.setdefault("target_names", ds_targets)
 
-    trainer_cfg = config.get("trainer", {})
     engine = None
 
     if method_key == "base":
@@ -260,7 +276,7 @@ def main(args):
                 {"regressor": regressor},
             )
 
-    reg_evaluator = RegressionEvaluator(regressor, **config["evaluator"])
+    reg_evaluator = RegressionEvaluator(regressor, **eval_cfg)
 
     if engine is not None:
         engine.run(val_dl)
@@ -311,38 +327,65 @@ def visualize_label_stream(dataloader: DataLoader, output_path: Path) -> None:
     labels: list[torch.Tensor] = []
     for _, y in dataloader:
         if isinstance(y, torch.Tensor):
-            labels.append(y.detach().flatten().cpu())
+            y_tensor = y.detach().cpu()
         else:
-            labels.append(torch.as_tensor(y).flatten().cpu())
+            y_tensor = torch.as_tensor(y).cpu()
+        labels.append(y_tensor.float())
 
     if not labels:
         print("No labels available to visualize.")
         return
 
-    label_tensor = torch.cat(labels).float()
-    idx = torch.arange(label_tensor.numel())
+    label_tensor = torch.cat(labels, dim=0).float()
+    if label_tensor.ndim == 1:
+        label_tensor = label_tensor.unsqueeze(1)
+    elif label_tensor.ndim > 2:
+        label_tensor = label_tensor.view(label_tensor.shape[0], -1)
+
+    num_dims = label_tensor.shape[1]
+    idx_np = torch.arange(label_tensor.shape[0]).numpy()
     label_np = label_tensor.numpy()
-    idx_np = idx.numpy()
-    bins = min(50, max(10, label_tensor.numel() // 10))
 
-    fig, axes = plt.subplots(
-        2,
-        1,
-        figsize=(10, 6),
-        sharex=False,
-        gridspec_kw={"height_ratios": (2, 1)},
-    )
-    axes[0].plot(idx_np, label_np, linewidth=0.8)
-    axes[0].set_ylabel("Label")
-    axes[0].set_xlabel("Sample index")
-    axes[0].set_title("Validation label stream (order of appearance)")
-    axes[0].grid(alpha=0.3, linestyle="--", linewidth=0.5)
+    if num_dims == 1:
+        bins = min(50, max(10, label_tensor.numel() // 10))
+        fig, axes = plt.subplots(
+            2,
+            1,
+            figsize=(10, 6),
+            sharex=False,
+            gridspec_kw={"height_ratios": (2, 1)},
+        )
+        axes[0].plot(idx_np, label_np[:, 0], linewidth=0.8)
+        axes[0].set_ylabel("Label")
+        axes[0].set_xlabel("Sample index")
+        axes[0].set_title("Validation label stream (order of appearance)")
+        axes[0].grid(alpha=0.3, linestyle="--", linewidth=0.5)
 
-    axes[1].hist(label_np, bins=bins, color="tab:orange", edgecolor="black", linewidth=0.5)
-    axes[1].set_xlabel("Label")
-    axes[1].set_ylabel("Count")
-    axes[1].set_title("Label distribution")
-    axes[1].grid(alpha=0.3, linestyle="--", linewidth=0.5)
+        axes[1].hist(label_np[:, 0], bins=bins, color="tab:orange", edgecolor="black", linewidth=0.5)
+        axes[1].set_xlabel("Label")
+        axes[1].set_ylabel("Count")
+        axes[1].set_title("Label distribution")
+        axes[1].grid(alpha=0.3, linestyle="--", linewidth=0.5)
+    else:
+        bins = min(50, max(10, label_tensor.shape[0] // 10))
+        fig, axes = plt.subplots(
+            num_dims,
+            2,
+            figsize=(12, 3 * num_dims),
+            sharex=False,
+        )
+        for dim in range(num_dims):
+            axes[dim, 0].plot(idx_np, label_np[:, dim], linewidth=0.8)
+            axes[dim, 0].set_ylabel(f"Label[{dim}]")
+            axes[dim, 0].set_xlabel("Sample index")
+            axes[dim, 0].set_title(f"Validation label stream dim {dim}")
+            axes[dim, 0].grid(alpha=0.3, linestyle="--", linewidth=0.5)
+
+            axes[dim, 1].hist(label_np[:, dim], bins=bins, color="tab:orange", edgecolor="black", linewidth=0.5)
+            axes[dim, 1].set_xlabel(f"Label[{dim}]")
+            axes[dim, 1].set_ylabel("Count")
+            axes[dim, 1].set_title(f"Label[{dim}] distribution")
+            axes[dim, 1].grid(alpha=0.3, linestyle="--", linewidth=0.5)
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=200)

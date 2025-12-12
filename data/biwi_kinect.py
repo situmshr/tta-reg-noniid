@@ -7,6 +7,7 @@ from torchvision.transforms import v2 as transforms
 import pandas as pd
 import numpy as np
 from PIL import Image
+import imageio.v2 as imageio
 
 from .data_configs import BIWI_PATH
 from .image_utils import (ImageDataset, ImageTransformDataset, ImageSubset,
@@ -14,7 +15,14 @@ from .image_utils import (ImageDataset, ImageTransformDataset, ImageSubset,
 
 
 class BiwiKinect(ImageDataset):
-    def __init__(self, gender: str, target: str | list[str], sequential: bool = False):
+    def __init__(
+        self,
+        gender: str,
+        target: str | list[str],
+        sequential: bool = False,
+        sequence_seed: int | None = None,
+        person: str | list[str] | None = None,
+    ):
         # targetが文字列の場合はリストに変換して統一的な処理を可能にする
         if isinstance(target, str):
             target = [target]
@@ -29,7 +37,16 @@ class BiwiKinect(ImageDataset):
             )
 
         with Path(self.root_dir, "gender.json").open("r", encoding="utf-8") as f:
-            person_dirs: str = json.load(f)[gender]
+            # person_dirs: str = json.load(f)[gender]
+            person_dirs: list[str] = json.load(f)[gender]
+
+        if person is not None:
+            # 人物IDが指定された場合は対象のみ残す
+            if isinstance(person, str):
+                person_list = [person]
+            else:
+                person_list = list(person)
+            person_dirs = [p for p in person_dirs if str(p) in set(map(str, person_list))]
 
         df = {
             "person": [],
@@ -73,12 +90,31 @@ class BiwiKinect(ImageDataset):
 
         # sequential=Trueの場合、人物IDとフレーム番号順にデータをソートする
         if sequential:
+            print("BiwiKinect: sort data sequentially")
             # 文字列のframe番号を数値として正しくソートするため、一時的なint列を作成
             self.metadata["frame_int"] = self.metadata["frame"].astype(int)
             # 人物ID -> フレーム番号の順に並べ替え、データの順序を一意に固定する
             self.metadata = self.metadata.sort_values(by=["person", "frame_int"]).reset_index(drop=True)
             # ソート用に使用した一時カラムを削除
             del self.metadata["frame_int"]
+        # if sequential:
+        #     print("BiwiKinect: sort data sequentially")
+        #     # 文字列のframe番号を数値として正しくソートするため、一時的なint列を作成
+        #     self.metadata["frame_int"] = self.metadata["frame"].astype(int)
+        #     # 人物ID -> フレーム番号の順に並べ替え、データの順序を一意に固定する
+        #     self.metadata = self.metadata.sort_values(by=["person", "frame_int"]).reset_index(drop=True)
+
+        #     persons = self.metadata["person"].unique().tolist()
+        #     # sequence_seedが未指定の場合は、外部で設定されたグローバルシード（例: --seed）を用いる
+        #     shuffler = np.random.default_rng(sequence_seed).shuffle if sequence_seed is not None else np.random.shuffle
+        #     shuffler(persons)
+        #     self.metadata = pd.concat(
+        #         [self.metadata[self.metadata["person"] == p] for p in persons],
+        #         ignore_index=True,
+        #     )
+
+        #     # ソート用に使用した一時カラムを削除
+        #     del self.metadata["frame_int"]
 
     def __len__(self) -> int:
         return len(self.metadata)
@@ -116,8 +152,20 @@ def matrix_to_angles(m: np.ndarray) -> tuple[float, float, float]:
 
 
 class BiwiKinectClassification(BiwiKinect):
-    def __init__(self, n_bins: int, gender: str, target: str):
-        super().__init__(gender, target)
+    def __init__(
+        self,
+        n_bins: int,
+        gender: str,
+        target: str,
+        sequential: bool = False,
+        sequence_seed: int | None = None,
+    ):
+        super().__init__(
+            gender,
+            target,
+            sequential=sequential,
+            sequence_seed=sequence_seed,
+        )
 
         self.n_bins = n_bins
 
@@ -178,9 +226,29 @@ def get_biwi_kinect(config: dict, apply_to_tensor: bool = True, classification: 
         train_ds = ImageSubset(ds, train_indices.tolist())
         val_ds = ImageSubset(ds, val_indices.tolist())
     else:
-        print("BiwiKinect: split randomly")
         n = int(len(ds) * config["dataset"]["train_ratio"])
         train_ds, val_ds = random_split(ds, n)
+
+    # sequential指定時は、全シーケンスを簡易的に動画として保存する（既存ならスキップ）
+    ds_cfg = config["dataset"].get("config", {})
+    if isinstance(ds, BiwiKinect) and ds_cfg.get("sequential"):
+        person_id = ds_cfg.get("person")
+        video_path = Path(BIWI_PATH) / f"{ds_cfg.get('gender', 'biwi')}_sequence{person_id}.mp4"
+        if video_path.exists():
+            print(f"Skip video export (already exists): {video_path}")
+        else:
+            print(f"Exporting BiwiKinect sequence video to {video_path}")
+            # FFMPEG backend を明示的に指定
+            with imageio.get_writer(
+                video_path,
+                fps=20,
+                codec="libx264",
+                format="FFMPEG",   # ★ ここを追加 # type: ignore
+            ) as writer:
+                for img, _ in ds:
+                    writer.append_data(np.array(img)) # type: ignore
+            print("Video export completed.")
+
 
     train_ds = ImageTransformDataset(train_ds, train_transform)
     val_ds = ImageTransformDataset(val_ds, val_transform)

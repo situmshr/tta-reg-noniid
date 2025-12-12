@@ -41,11 +41,13 @@ class WeightedSignificantSubspaceAlignment(BaseTTA):
 
     def __post_init__(self,
                       compile_model: dict | None,
+                      val_dataset,
+                      target_names,
                       pc_config: dict | None,
                       loss_config: dict | None):
         self._pc_config = dict(pc_config or {})
         self._loss_config = dict(loss_config or {})
-        super().__post_init__(compile_model)
+        super().__post_init__(compile_model, val_dataset, target_names)
         self._init_subspace()
 
     def _init_subspace(self) -> None:

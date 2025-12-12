@@ -77,7 +77,12 @@ def main(args):
         trainer, train_dl, "train_" + config["dataset"]["name"], train_ev_logger, run_evaluator=False
     )
 
-    evaluator = RegressionEvaluator(net, **config["evaluator"])
+    ds_targets = (config.get("dataset", {}).get("config", {}) or {}).get("target")
+    eval_cfg = dict(config["evaluator"])
+    eval_cfg.setdefault("val_dataset", val_ds)
+    if ds_targets is not None:
+        eval_cfg.setdefault("target_names", ds_targets)
+    evaluator = RegressionEvaluator(net, **eval_cfg)
 
     val_ev_logger = EvaluationAccumulator()
     val_ev_runner = EvaluationRunner(

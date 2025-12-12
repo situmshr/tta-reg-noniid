@@ -1,11 +1,27 @@
 from dataclasses import InitVar, dataclass, field
 from typing import Protocol, cast
+import copy
 
 import torch
 from torch import Tensor, nn
 
 from methods.base import BaseTTA
 from .utils import get_pca_basis, diagonal_gaussian_kl_loss
+
+
+@torch.no_grad()
+def ema_update_model(model_to_update: nn.Module,
+                     model_to_merge: nn.Module,
+                     momentum: float,
+                     device: torch.device,
+                     update_all: bool = False) -> nn.Module:
+    if momentum < 1.0:
+        for param_to_update, param_to_merge in zip(model_to_update.parameters(),
+                                                   model_to_merge.parameters()):
+            if param_to_update.requires_grad or update_all:
+                param_to_update.data = momentum * param_to_update.data + \
+                    (1 - momentum) * param_to_merge.data.to(device)
+    return model_to_update
 
 
 class TensorCallable(Protocol):
@@ -84,6 +100,7 @@ class ER_SSA(BaseTTA):
     min_buffer_size: int = 1
     ssa_weight: float = 1.0
     ema_alpha: float = 0.1
+    ema_momentum: float = 0.99
     main_loss: str = "none"
     weight_bias: float = 1.0
     weight_exp: float = 1.0
@@ -104,11 +121,12 @@ class ER_SSA(BaseTTA):
     buffer_imgs: Tensor | None = field(init=False, default=None, repr=False)
     buffer_scores: Tensor | None = field(init=False, default=None, repr=False)
     buffer_sample_count: int = field(init=False, default=0, repr=False)
+    source_net: nn.Module | None = field(init=False, default=None, repr=False)
 
-    def __post_init__(self, compile_model: dict | None, pc_config: dict | None, loss_config: dict | None):
+    def __post_init__(self, compile_model: dict | None, val_dataset, target_names, pc_config: dict | None, loss_config: dict | None):
         self._pc_config = dict(pc_config or {})
         self._loss_config = dict(loss_config or {})
-        super().__post_init__(compile_model)
+        super().__post_init__(compile_model, val_dataset, target_names)
 
         if self.min_buffer_size < 1:
             raise ValueError("min_buffer_size must be >= 1.")
@@ -116,6 +134,10 @@ class ER_SSA(BaseTTA):
             raise ValueError("min_buffer_size cannot exceed buffer_size.")
 
         self._init_subspace()
+        # keep a frozen copy of the source model for EMA merge
+        self.source_net = copy.deepcopy(self.net).to(self.device)
+        for p in self.source_net.parameters(): # type: ignore
+            p.requires_grad_(False)
 
         feature = getattr(self.net, "feature", None)
         predictor = getattr(self.net, "predict_from_feature", None)
@@ -143,8 +165,9 @@ class ER_SSA(BaseTTA):
             # 現在バッチで通常の forward
             feats = self.feature_extractor(x)
             flat_feats = feats.reshape(feats.size(0), -1)
-            y_pred = self.predictor(flat_feats).view(-1)
-
+            # y_pred = self.predictor(flat_feats).view(-1)
+            y_pred = self.predictor(flat_feats)
+            
             # バッファ不足時は現在のバッチのみで統計を計算
             feats_subspace = self._project_to_subspace(flat_feats)
         else:
@@ -154,7 +177,8 @@ class ER_SSA(BaseTTA):
             feats = self.feature_extractor(x_combined)
             flat_feats_combined = feats.reshape(feats.size(0), -1)
             flat_feats = flat_feats_combined[:x.shape[0]]
-            y_pred = self.predictor(flat_feats).view(-1)
+            # y_pred = self.predictor(flat_feats).view(-1)
+            y_pred = self.predictor(flat_feats)
 
             feats_subspace = self._project_to_subspace(flat_feats_combined)
             buffer_ready = True
@@ -192,7 +216,7 @@ class ER_SSA(BaseTTA):
 
         x, y = batch
         x = x.to(self.device)
-        y = y.to(self.device).float().flatten()
+        y = y.to(self.device).float()
 
         if self.opt is not None:
             self.opt.zero_grad(set_to_none=True)
@@ -201,8 +225,19 @@ class ER_SSA(BaseTTA):
 
         if self.opt is not None and loss is not None:
             # print(f"ER_SSA_GDM loss: {loss.item():.6f}")
+            # 元の更新のみ
+            # loss.backward()
+            # self.opt.step()
             loss.backward()
             self.opt.step()
+            if self.source_net is not None:
+                ema_update_model(
+                    model_to_update=self.net,
+                    model_to_merge=self.source_net,
+                    momentum=self.ema_momentum,
+                    device=self.device,
+                    update_all=False,
+                )
 
         output["y"] = y
         return output
@@ -228,9 +263,9 @@ class ER_SSA(BaseTTA):
 
         with torch.no_grad():
             regressor_weight = self._get_regressor_weight()
-            dim_weight = torch.abs(regressor_weight @ self.pca_basis).flatten()
+            dim_weight = torch.abs(regressor_weight @ self.pca_basis).sum(dim=0)
             self.dim_weight = (dim_weight + self.weight_bias).pow(self.weight_exp)
-            print(f"ER_SSA dim_weight: {self.dim_weight}")
+            print(f"SSA dim_weight: {self.dim_weight.shape}")
 
     def _project_to_subspace(self, flat_feats: Tensor) -> Tensor:
         if self.feature_mean is None or self.pca_basis is None:

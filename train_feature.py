@@ -88,9 +88,13 @@ def main() -> None:
     calculator = FeatureCalculator(regressor, **config["calculator"])
     calculator.run(loader)
     features, labels = calculator.get_feats()
-    feat_labels = torch.cat([features, labels.unsqueeze(1)], dim=1)
+    labels = labels.view(labels.size(0), -1)
+    feat_labels = torch.cat([features, labels], dim=1)
 
     out_dir = Path(args.o, config["dataset"]["name"])
+    if config["dataset"]["config"].get("gender") is not None:
+        out_dir = out_dir / config["dataset"]["config"]["gender"]
+
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{config['regressor']['config']['backbone']}.pt"
     torch.save(feat_labels, out_path)

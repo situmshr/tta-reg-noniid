@@ -27,8 +27,12 @@ models/valid_features/
 *.yaml
 
 # check files
+checks/
 check_*.py
 plot_loglik*.py
+
+# text files
+texfiles/
 
 # shell scripts
 *.sh

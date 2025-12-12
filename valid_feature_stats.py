@@ -54,13 +54,16 @@ def main(args):
     calc.run(dl)
 
     mean, cov, features, labels = calc.compute_stats()
-    feat_labels = torch.cat([features, labels.unsqueeze(1)], dim=1)
+    labels = labels.view(labels.size(0), -1)
+    feat_labels = torch.cat([features, labels], dim=1)
     cov_np = cov.numpy()
     eigvals, eigvecs = np.linalg.eigh(cov_np)
 
     print(f"rank of cov: {np.linalg.matrix_rank(cov_np)}")
 
     stat_dir = Path(args.o, "stats", config["dataset"]["name"])
+    if config["dataset"]["config"].get("gender") is not None:
+        stat_dir = stat_dir / config["dataset"]["config"]["gender"]
     stat_dir.mkdir(parents=True, exist_ok=True)
     p = Path(stat_dir, config["regressor"]["config"]["backbone"]+".pt")
     torch.save({
@@ -70,7 +73,9 @@ def main(args):
     }, str(p))
 
     if args.save_feature:
-        feature_dir = Path(args.o, "valid_features", config["dataset"]["name"])
+        feature_dir = Path(args.o, "train_features", config["dataset"]["name"])
+        if config["dataset"]["config"].get("gender") is not None:
+            feature_dir = feature_dir / config["dataset"]["config"]["gender"]
         feature_dir.mkdir(parents=True, exist_ok=True)
         p = Path(feature_dir, config["regressor"]["config"]["backbone"]+".pt")
         torch.save(feat_labels, str(p))

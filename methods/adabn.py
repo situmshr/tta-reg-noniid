@@ -14,8 +14,8 @@ from methods.base import BaseTTA
 class AdaptiveBatchNorm(BaseTTA):
     """AdaBN: run BatchNorm layers with mini-batch statistics during inference."""
 
-    def __post_init__(self, compile_model: dict | None):
-        super().__post_init__(compile_model)
+    def __post_init__(self, compile_model: dict | None, val_dataset=None, target_names=None):
+        super().__post_init__(compile_model, val_dataset, target_names)
         self.train_mode = False  # keep non-BN layers in eval mode
         self._bn_layers: Tuple[_BatchNorm, ...] = tuple(self._collect_bn_layers(self.net))
         if not self._bn_layers:

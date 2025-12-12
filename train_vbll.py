@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from pprint import pprint
 from typing import Any
@@ -79,6 +80,58 @@ def load_feature_bundle(config: dict[str, Any],
     return feats, targets
 
 
+def find_regressor_checkpoint(config: dict[str, Any]) -> Path | None:
+    reg_cfg = config.get("regressor", {})
+    if (ckpt := reg_cfg.get("source")) is not None:
+        return Path(ckpt)
+
+    dataset_name = (config.get("dataset") or {}).get("name")
+    backbone = (reg_cfg.get("config") or {}).get("backbone")
+    if dataset_name is None or backbone is None:
+        return None
+
+    search_dir = Path("models", "weights", dataset_name)
+    ds_cfg = (config.get("dataset") or {}).get("config") or {}
+    gender = ds_cfg.get("gender")
+    if gender:
+        search_dir = search_dir / gender
+
+    candidates = [
+        p for p in search_dir.glob(f"{backbone}_model_*.pt")
+        if "-vbll" not in p.stem
+    ]
+    if not candidates:
+        return None
+
+    def _step_key(path: Path) -> tuple[int, float]:
+        match = re.search(r"_model_(\d+)", path.stem)
+        step = int(match.group(1)) if match else -1
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        return (step, mtime)
+
+    return max(candidates, key=_step_key)
+
+
+def load_linear_head_weight(config: dict[str, Any]) -> tuple[Tensor | None, Path | None]:
+    ckpt = find_regressor_checkpoint(config)
+    if ckpt is None:
+        print("train_vbll: base regressor checkpoint not found; use default VBLL init.")
+        return None, None
+
+    state = torch.load(ckpt, map_location="cpu")
+    state_dict = state["model"] if isinstance(state, dict) and "model" in state else state
+
+    weight = state_dict.get("regressor.weight")
+    if weight is None:
+        print(f"train_vbll: 'regressor.weight' not found in {ckpt}; use default VBLL init.")
+        return None, ckpt
+
+    return weight, ckpt
+
+
 def build_loader(dataset: TensorDataset,
                  split: str,
                  config: dict[str, Any]) -> DataLoader:
@@ -154,11 +207,16 @@ def main(args) -> None:
     val_feats, val_targets = load_feature_bundle(config, "val")
     val_dataset = TensorDataset(val_feats, val_targets)
 
+    init_weight, init_ckpt = load_linear_head_weight(config)
+
     head = create_vbll_head(
         in_features=train_feats.shape[1],
         out_features=train_targets.shape[1],
-        trainset_size=len(train_dataset)
+        trainset_size=len(train_dataset),
+        init_weight=init_weight,
     ).cuda()
+    if init_weight is not None and init_ckpt is not None:
+        print(f"VBLL head: initialized W_mean from linear regressor at {init_ckpt}")
 
     optimizer = create_optimizer(head, config)
 

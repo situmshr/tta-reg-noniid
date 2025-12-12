@@ -16,8 +16,8 @@ class VarianceMinimizationEM(BaseTTA):
     variance_weight: float = 1.0
 
 
-    def __post_init__(self, compile_model: dict | None):
-        super().__post_init__(compile_model)
+    def __post_init__(self, compile_model: dict | None, val_dataset=None, target_names=None):
+        super().__post_init__(compile_model, val_dataset, target_names)
         if self.vbll_head is None:
             raise ValueError("vbll_head must be provided for VarianceMinimizationEM")
         self.vbll_head = self.vbll_head.to(self.device)

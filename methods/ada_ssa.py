@@ -135,9 +135,9 @@ class AdaptiveSSA(BaseTTA):
     target_sample_count: int | None = field(default=None, repr=False)
     sample_alpha: float = field(default=1.0, repr=False)
 
-    def __post_init__(self, compile_model: dict | None, pc_config: dict | None):
+    def __post_init__(self, compile_model: dict | None, val_dataset, target_names, pc_config: dict | None):
         self._pc_config = dict(pc_config or {})
-        super().__post_init__(compile_model)
+        super().__post_init__(compile_model, val_dataset, target_names)
         self._init_subspace()
         feature = getattr(self.net, "feature", None)
         predictor = getattr(self.net, "predict_from_feature", None)
@@ -348,4 +348,3 @@ class AdaptiveSSA(BaseTTA):
                 if isinstance(tensor, torch.Tensor) and tensor.dim() == 2:
                     return int(tensor.size(0))
         return None
-

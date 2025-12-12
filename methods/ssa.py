@@ -31,11 +31,13 @@ class SignificantSubspaceAlignment(BaseTTA):
 
     def __post_init__(self,
                       compile_model: dict | None,
+                      val_dataset,
+                      target_names,
                       pc_config: dict | None,
                       loss_config: dict | None):
         self._pc_config = dict(pc_config or {})
         self._loss_config = dict(loss_config or {})
-        super().__post_init__(compile_model)
+        super().__post_init__(compile_model, val_dataset, target_names)
         self._init_subspace()
 
     def _init_subspace(self) -> None:
@@ -49,9 +51,10 @@ class SignificantSubspaceAlignment(BaseTTA):
 
         with torch.no_grad():
             regressor_weight = self._get_regressor_weight()
-            dim_weight = torch.abs(regressor_weight @ self.basis).flatten()
+            # dim_weight = torch.abs(regressor_weight @ self.basis).flatten()
+            dim_weight = torch.abs(regressor_weight @ self.basis).sum(dim=0)
             self.dim_weight = (dim_weight + self.weight_bias).pow(self.weight_exp)
-            print(f"SSA dim_weight: {self.dim_weight}")
+            print(f"SSA dim_weight: {self.dim_weight.shape}")
 
         feature = getattr(self.net, "feature", None)
         predictor = getattr(self.net, "predict_from_feature", None)
