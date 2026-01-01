@@ -12,8 +12,8 @@ wheels/
 # image files
 data/UTKFace
 data/BiwiKinect
-data/BiwiKinect.tar
-
+data/4Seasons
+code1_v1_4seasons
 # train outputs
 outputs/
 models/weights/
@@ -22,6 +22,7 @@ models/features/
 models/train_features/
 models/valid_features/
 *.pt
+
 
 # config files
 *.yaml
@@ -40,6 +41,9 @@ run_*.py
 
 # RADEME files
 *.md
+
+# log files
+*.log
 
 # python version
 .python-version

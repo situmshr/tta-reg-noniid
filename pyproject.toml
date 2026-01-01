@@ -20,6 +20,7 @@ dependencies = [
     "timm>=1.0.22",
     "torch>=2.9.0",
     "torchvision>=0.24.0",
+    "transforms3d>=0.4.2",
     "vbll>=0.4.9",
     "wandb>=0.22.3",
 ]

@@ -17,6 +17,12 @@ from models.arch import create_regressor, Regressor, extract_bn_layers, extract_
 from data import get_datasets, get_non_iid_dataset
 from data.image_utils import ImageSubset
 from evaluation.evaluator import RegressionEvaluator
+from evaluation.four_seasons_eval import (
+    collate_first_two,
+    evaluate_four_seasons,
+    evaluate_four_seasons_online,
+    FourSeasonsOnlineTracker,
+)
 from methods import (
     VarianceMinimizationEM,
     SignificantSubspaceAlignment,
@@ -24,6 +30,7 @@ from methods import (
     AdaptiveBatchNorm,
     AdaptiveSSA,
     ER_SSA,
+    Mem_SSA,
 )
 
 
@@ -146,7 +153,12 @@ def main(args):
         output_dir = Path(args.o, stream_label, dataset_dir, f"{backbone}-{method_name}", seed_label)
     elif dataset_name == "biwi_kinect":
         gender = config["dataset"]["config"].get("gender")
-        output_dir = Path(args.o, dataset_dir, gender, f"{backbone}-{method_name}", seed_label)
+        person_id = config["dataset"]["config"].get("person")
+        output_dir = Path(args.o, dataset_dir, gender, person_id, f"{backbone}-{method_name}", seed_label)
+    elif dataset_name == "4seasons":
+        scene = config["dataset"]["config"].get("scene", "unknown")
+        seq_name = config["dataset"]["config"].get("seqs", "unknown")[0]
+        output_dir = Path(args.o, dataset_dir, scene, seq_name, f"{backbone}-{method_name}", seed_label)
     else:
         raise ValueError(f"Unsupported dataset: {dataset_name!r}")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -162,7 +174,11 @@ def main(args):
     if stream_type == "non_iid":
         print(f"Applying non-iid data stream: {non_iid_kwargs}")
         val_ds = get_non_iid_dataset(val_ds, **(non_iid_kwargs or {}))
-    val_dl = DataLoader(val_ds, **config["adapt_dataloader"])
+
+    if dataset_name == "4seasons":
+        val_dl = DataLoader(val_ds, **config["adapt_dataloader"], collate_fn=collate_first_two)
+    else:
+        val_dl = DataLoader(val_ds, **config["adapt_dataloader"])
 
     if args.viz_label_stream:
         visualize_label_stream(val_dl, Path(output_dir, "val_label_stream.png"))
@@ -253,13 +269,33 @@ def main(args):
             "min_buffer_size": tta_cfg.get("min_buffer_size", 1),
             "ssa_weight": tta_cfg.get("ssa_weight", 1.0),
             "ema_alpha": tta_cfg.get("ema_alpha", 0.1),
-            "main_loss": tta_cfg.get("main_loss", "none"),
+            "ema_momentum": tta_cfg.get("ema_momentum", 0.99),
         }
         engine = ER_SSA(
             regressor,
             opt,
             **trainer_cfg,
             **er_kwargs,
+        )
+    elif method_key == "mem_ssa":
+        opt = create_optimizer(regressor, config)
+        mem_kwargs = {
+            "pc_config": tta_cfg.get("pc_config"),
+            "buffer_size": tta_cfg.get("buffer_size", 512),
+            "min_buffer_size": tta_cfg.get("min_buffer_size", 1),
+            "stats_buffer_size": tta_cfg.get("stats_buffer_size", 128),
+            "membn_gamma": tta_cfg.get("membn_gamma", 0.3),
+            "ssa_weight": tta_cfg.get("ssa_weight", 1.0),
+            "ema_momentum": tta_cfg.get("ema_momentum", 0.99),
+            "weight_bias": tta_cfg.get("weight_bias", 1.0),
+            "weight_exp": tta_cfg.get("weight_exp", 1.0),
+            "debug": tta_cfg.get("debug", False),
+        }
+        engine = Mem_SSA(
+            regressor,
+            opt,
+            **trainer_cfg,
+            **mem_kwargs,
         )
     else:
         raise ValueError(
@@ -276,17 +312,44 @@ def main(args):
                 {"regressor": regressor},
             )
 
-    reg_evaluator = RegressionEvaluator(regressor, **eval_cfg)
+    is_four_seasons = dataset_name == "4seasons"
+    reg_evaluator = None if is_four_seasons else RegressionEvaluator(regressor, **eval_cfg)
+
+    tracker = None
+    if is_four_seasons and engine is not None:
+        tracker = FourSeasonsOnlineTracker(config["dataset"]["config"])
+        engine.add_event_handler(Events.ITERATION_COMPLETED, tracker.update)
 
     if engine is not None:
         engine.run(val_dl)
-    reg_evaluator.run(val_dl)
+
+    online_eval_metrics = None
+    if is_four_seasons:
+        fig_dir = output_dir / "figures"
+        offline_fig = fig_dir / "trajectory.png"
+        online_fig = fig_dir / "trajectory_online.png"
+        # online-style eval during adaptation (uses tracker if available)
+        if tracker is not None:
+            online_eval_metrics = tracker.compute(fig_path=online_fig)
+        else:
+            online_eval_metrics = evaluate_four_seasons_online(
+                regressor, val_dl, config["dataset"]["config"], fig_path=online_fig
+            )
+        # offline-style eval (full pass, aggregate)
+        offline_metrics = evaluate_four_seasons(
+            regressor, val_dl, config["dataset"]["config"], fig_path=offline_fig
+        )
+    else:
+        reg_evaluator.run(val_dl) # type: ignore
+        offline_metrics = reg_evaluator.state.metrics # type: ignore
 
     metrics = {
         "iteration": engine.state.iteration if engine is not None else 0,
         "online": engine.state.metrics if engine is not None else {},
-        "offline": reg_evaluator.state.metrics
+        "offline": offline_metrics
     }
+    if online_eval_metrics is not None:
+        metrics["online_eval"] = online_eval_metrics
     pprint(metrics)
     with Path(output_dir, "metrics.json").open("w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=4, ensure_ascii=False)
@@ -357,7 +420,7 @@ def visualize_label_stream(dataloader: DataLoader, output_path: Path) -> None:
         )
         axes[0].plot(idx_np, label_np[:, 0], linewidth=0.8)
         axes[0].set_ylabel("Label")
-        axes[0].set_xlabel("Sample index")
+        axes[0].set_xlabel("Time")
         axes[0].set_title("Validation label stream (order of appearance)")
         axes[0].grid(alpha=0.3, linestyle="--", linewidth=0.5)
 
@@ -377,7 +440,7 @@ def visualize_label_stream(dataloader: DataLoader, output_path: Path) -> None:
         for dim in range(num_dims):
             axes[dim, 0].plot(idx_np, label_np[:, dim], linewidth=0.8)
             axes[dim, 0].set_ylabel(f"Label[{dim}]")
-            axes[dim, 0].set_xlabel("Sample index")
+            axes[dim, 0].set_xlabel("Time")
             axes[dim, 0].set_title(f"Validation label stream dim {dim}")
             axes[dim, 0].grid(alpha=0.3, linestyle="--", linewidth=0.5)
 

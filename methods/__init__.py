@@ -5,6 +5,7 @@ from .adabn import AdaptiveBatchNorm
 from .wssa import WeightedSignificantSubspaceAlignment
 from .ada_ssa import AdaptiveSSA
 from .er_ssa import ER_SSA
+from .mem_ssa import Mem_SSA
 
 __all__ = [
     "BaseTTA",
@@ -14,4 +15,5 @@ __all__ = [
     "WeightedSignificantSubspaceAlignment",
     "AdaptiveSSA",
     "ER_SSA",
+    "Mem_SSA",
 ]

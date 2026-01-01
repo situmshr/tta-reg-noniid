@@ -22,7 +22,7 @@ class SignificantSubspaceAlignment(BaseTTA):
 
     pc_config: InitVar[dict | None] = None
     loss_config: InitVar[dict | None] = None
-    weight_bias: float = 1e-6
+    weight_bias: float = 1.0
     weight_exp: float = 1.0
     feature_extractor: TensorCallable | None = field(init=False, default=None, repr=False)
     predictor: TensorCallable | None = field(init=False, default=None, repr=False)
@@ -54,7 +54,6 @@ class SignificantSubspaceAlignment(BaseTTA):
             # dim_weight = torch.abs(regressor_weight @ self.basis).flatten()
             dim_weight = torch.abs(regressor_weight @ self.basis).sum(dim=0)
             self.dim_weight = (dim_weight + self.weight_bias).pow(self.weight_exp)
-            print(f"SSA dim_weight: {self.dim_weight.shape}")
 
         feature = getattr(self.net, "feature", None)
         predictor = getattr(self.net, "predict_from_feature", None)
