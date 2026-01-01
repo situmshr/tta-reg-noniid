@@ -20,3 +20,11 @@ valid_feature_stats.py で保存したラベルと weighted_valid_feature_stats.
 valid_feature_stats.py は calc.compute_stats() で取得した labels をそのまま feat_labels = torch.cat([features, labels], dim=1) として保存します。この labels は BiwiKinect の __getitem__ が target リスト順に組み立てたものです。
 weighted_valid_feature_stats.py 側も同じ target_keys = config["dataset"]["config"]["target"] を読み、feat_labels を末尾から label_dim 個切り出して src_label にし、ターゲット側も metadata から for k in target_keys で並べています。
 したがって、同じ config を使っている限り、yaw が yaw に、roll が roll に対応し、順番が入れ替わることはありません（target の順序を変える／異なる config で作った特徴ファイルを読む場合は要注意）。
+
+やるべきこと
+- [ ] UMAPによるアライメントの可視化
+- [ ] UTKFace-Cにおいて非定常分布での平均，分散がどのように偏っているかをプロット
+- [ ] 性能比較を棒グラフで作成（UTKFace, 4Seasons）＋　定常分布下でのSSAの棒グラフも追加
+- [ ] EMAパラメータのalbation studyのプロット（これは散布図）
+- [ ] 実験セクションの流れを決める
+
