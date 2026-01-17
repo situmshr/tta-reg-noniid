@@ -10,7 +10,6 @@ import torch
 import vbll
 from torch.utils.data import DataLoader
 from ignite.engine import Events
-from ignite.handlers import ModelCheckpoint
 
 from utils.seed import fix_seed
 from models.arch import create_regressor, Regressor, extract_bn_layers, extract_gn_layers
@@ -303,14 +302,23 @@ def main(args):
         )
 
     if args.save:
-        if engine is None:
-            torch.save(regressor.state_dict(), Path(output_dir, "regressor.pt"))
+        output_root = Path(args.o)
+        rel_path = output_dir.relative_to(output_root)
+        rel_parts = rel_path.parts
+        if len(rel_parts) >= 2:
+            save_subdir = Path(*rel_parts[:-2])
         else:
-            engine.add_event_handler(
-                Events.COMPLETED,
-                ModelCheckpoint(output_dir, "adapted", require_empty=False),
-                {"regressor": regressor},
-            )
+            save_subdir = Path()
+        save_dir = Path("models", "tta_weights", save_subdir)
+        save_path = save_dir / f"{backbone}_{method_key}.pt"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        if engine is None:
+            torch.save(regressor.state_dict(), save_path)
+        else:
+            def save_regressor(_) -> None:
+                torch.save(regressor.state_dict(), save_path)
+
+            engine.add_event_handler(Events.COMPLETED, save_regressor)
 
     is_four_seasons = dataset_name == "4seasons"
     reg_evaluator = None if is_four_seasons else RegressionEvaluator(regressor, **eval_cfg)

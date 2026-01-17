@@ -26,5 +26,5 @@ weighted_valid_feature_stats.py 側も同じ target_keys = config["dataset"]["co
 - [ ] UTKFace-Cにおいて非定常分布での平均，分散がどのように偏っているかをプロット
 - [ ] 性能比較を棒グラフで作成（UTKFace, 4Seasons）＋　定常分布下でのSSAの棒グラフも追加
 - [ ] EMAパラメータのalbation studyのプロット（これは散布図）
-- [ ] 実験セクションの流れを決める
+- [x] 実験セクションの流れを決める
 
