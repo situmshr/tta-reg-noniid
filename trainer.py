@@ -17,6 +17,7 @@ class RegressionTrainer(Engine):
     net: Regressor
     opt: torch.optim.Optimizer
     compile_model: InitVar[dict | None]
+    loss_fn: torch.nn.Module | None = None
 
     def __post_init__(self, compile_model: dict | None):
         super().__init__(self.update)
@@ -42,20 +43,51 @@ class RegressionTrainer(Engine):
         self.net.train()
         self.opt.zero_grad()
 
-        x, y = batch
+        # OLD:
+        # x, y = batch
+        # x = x.cuda()
+        # y = y.float().cuda()
+        #
+        # y_pred = self.net(x)
+        #
+        # loss = F.mse_loss(y_pred, y)
+
+        x = batch[0]
+        y = batch[1]
         x = x.cuda()
         y = y.float().cuda()
 
+        b = None
+        l = None
+        if x.dim() == 5:
+            b, l, c, h, w = x.shape
+            x = x.view(b * l, c, h, w)
+
         y_pred = self.net(x)
 
-        loss = F.mse_loss(y_pred, y)
+        y_pred_flat = y_pred
+        y_flat = y
+        if b is not None and l is not None and y.dim() >= 2:
+            y_pred_seq = y_pred.view(b, l, -1)
+            y_seq = y.view(b, l, -1)
+            if self.loss_fn is not None:
+                loss = self.loss_fn(y_pred_seq, y_seq)
+            else:
+                loss = F.mse_loss(y_pred_seq, y_seq)
+            y_pred_flat = y_pred_seq.reshape(-1, y_pred_seq.shape[-1])
+            y_flat = y_seq.reshape(-1, y_seq.shape[-1])
+        else:
+            if self.loss_fn is not None:
+                loss = self.loss_fn(y_pred, y)
+            else:
+                loss = F.mse_loss(y_pred, y)
 
         loss.backward()
         self.opt.step()
 
         return {
-            "y_pred": y_pred,
-            "y": y
+            "y_pred": y_pred_flat,
+            "y": y_flat
         }
     
 @dataclass

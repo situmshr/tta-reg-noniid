@@ -22,6 +22,16 @@ import torch
 from torch import Tensor
 from dataclasses import dataclass, field
 
+def _select_center_frame(x: Tensor, y: Tensor | None = None) -> tuple[Tensor, Tensor | None]:
+    if x.dim() == 5:
+        seq_len = x.size(1)
+        center = seq_len // 2
+        x = x[:, center]
+        if y is not None and y.dim() == 3 and y.size(1) == seq_len:
+            y = y[:, center]
+    return x, y
+
+
 @dataclass
 class GlobalStats:
     """Manages global running statistics using Mean and Variance directly."""
@@ -70,7 +80,7 @@ class GlobalStats:
 
 
 @dataclass
-class ER_SSA(BaseTTA):
+class RS_SSA(BaseTTA):
     pc_config: InitVar[dict | None] = None
     loss_config: InitVar[dict | None] = None
 
@@ -124,6 +134,8 @@ class ER_SSA(BaseTTA):
         self.source_net = copy.deepcopy(self.net).to(self.device).requires_grad_(False)
 
     def adapt_step(self, x: Tensor, y: Tensor) -> tuple[dict[str, Tensor], Tensor]:
+        x, _ = _select_center_frame(x)
+
         # 1. Forward & Buffer Logic
         use_buffer = (self.buffer_imgs is not None) and (self.buffer_imgs.size(0) >= self.min_buffer_size)
 
@@ -160,16 +172,6 @@ class ER_SSA(BaseTTA):
         kl_bwd = diagonal_gaussian_kl_loss(self.pca_mean, self.pca_var, g_mu, g_var, dim_reduction="none", **self._loss_config) # type: ignore
         ssa_loss = ((kl_fwd + kl_bwd) * self.dim_weight).sum() # type: ignore
 
-        # if use_buffer:
-        #     with torch.no_grad():
-        #         self.global_stats.stat_update = True # type: ignore
-        #         buffer_projected = projected[n_sample:] # type: ignore
-        #         self.global_stats.update( # type: ignore
-        #             buffer_projected.mean(dim=0), 
-        #             buffer_projected.var(dim=0, unbiased=False)
-        #         )
-        #         self.global_stats.stat_update = False # type: ignore
-
         # 4. Update Buffer (GDM)
         self._update_buffer(x)
 
@@ -182,6 +184,7 @@ class ER_SSA(BaseTTA):
     def _update(self, engine, batch):
         self.net.train() if self.train_mode else self.net.eval()
         x, y = batch[0].to(self.device), batch[1].to(self.device).float()
+        x, y = _select_center_frame(x, y)
 
         if self.opt: self.opt.zero_grad(set_to_none=True)
         

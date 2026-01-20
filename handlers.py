@@ -1,6 +1,7 @@
 from typing import Any, Optional
 from dataclasses import dataclass
 import copy
+from pathlib import Path
 
 from torch.utils.data.dataloader import DataLoader
 from ignite.engine.engine import Engine
@@ -8,6 +9,8 @@ from ignite.engine.events import Events
 
 import pandas as pd
 import wandb
+
+from evaluation.four_seasons_eval import evaluate_four_seasons_epoch
 
 
 class EvaluationAccumulator:
@@ -115,3 +118,49 @@ class DataStreamLogger:
                 title=f"{self.dataset_name} Label Stream"
             )
         })
+
+
+def make_run_val_epoch(
+    val_ev_runner: EvaluationRunner,
+    is_four_seasons: bool,
+    net: Any,
+    val_dl: DataLoader,
+    ds_cfg: dict[str, Any],
+    run_dir: Path,
+):
+    def _run(engine: Engine) -> None:
+        val_ev_runner(engine)
+        if not is_four_seasons:
+            return
+        metrics = evaluate_four_seasons_epoch(
+            net,
+            val_dl,
+            ds_cfg,
+            engine.state.epoch,
+            run_dir,
+        )
+        results_path = Path(run_dir) / "results.txt"
+        with results_path.open("a", encoding="utf-8") as f:
+            f.write(
+                "t median {:.2f} m,  mean {:.2f} m\n"
+                "q median {:.2f} degrees, mean {:.2f} degree\n"
+                "Epoch {:d}\n"
+                "-----------------------\n".format(
+                    metrics["t_median"],
+                    metrics["t_mean"],
+                    metrics["q_median"],
+                    metrics["q_mean"],
+                    engine.state.epoch,
+                )
+            )
+        print(
+            "t median {:.2f} m,  mean {:.2f} m | q median {:.2f} degrees, mean {:.2f} degree".format(
+                metrics["t_median"],
+                metrics["t_mean"],
+                metrics["q_median"],
+                metrics["q_mean"],
+            ),
+            flush=True,
+        )
+
+    return _run

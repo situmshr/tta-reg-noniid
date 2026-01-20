@@ -16,8 +16,18 @@ class KLCallable(Protocol):
     def __call__(self, m1: Tensor, v1: Tensor, m2: Tensor, v2: Tensor) -> Tensor: ...
 
 
+def _select_center_frame(x: Tensor, y: Tensor | None = None) -> tuple[Tensor, Tensor | None]:
+    if x.dim() == 5:
+        seq_len = x.size(1)
+        center = seq_len // 2
+        x = x[:, center]
+        if y is not None and y.dim() == 3 and y.size(1) == seq_len:
+            y = y[:, center]
+    return x, y
+
+
 @dataclass
-class SignificantSubspaceAlignment(BaseTTA):
+class SSA(BaseTTA):
     """SSA: subspace alignment style TTA using PCA statistics."""
 
     pc_config: InitVar[dict | None] = None
@@ -51,7 +61,6 @@ class SignificantSubspaceAlignment(BaseTTA):
 
         with torch.no_grad():
             regressor_weight = self._get_regressor_weight()
-            # dim_weight = torch.abs(regressor_weight @ self.basis).flatten()
             dim_weight = torch.abs(regressor_weight @ self.basis).sum(dim=0)
             self.dim_weight = (dim_weight + self.weight_bias).pow(self.weight_exp)
 
@@ -65,6 +74,9 @@ class SignificantSubspaceAlignment(BaseTTA):
     def adapt_step(self, x: Tensor, y: Tensor) -> tuple[dict[str, Tensor], Tensor]:
         if self.feature_extractor is None or self.predictor is None:
             raise RuntimeError("SSA feature extractor is not initialized.")
+
+        x, _ = _select_center_frame(x)
+
         feature = self.feature_extractor(x)
         y_pred = self.predictor(feature)
 
@@ -81,6 +93,31 @@ class SignificantSubspaceAlignment(BaseTTA):
         kl_loss = (kl_loss * self.dim_weight).sum()
 
         return {"y_pred": y_pred, "feat_pc": f_pc}, kl_loss
+
+    def _update(self, engine, batch: tuple[Tensor, Tensor]) -> dict[str, Tensor]:
+        if self.train_mode:
+            self.net.train()
+        else:
+            self.net.eval()
+
+        x, y = batch
+        x = x.to(self.device)
+        y = y.to(self.device).float()
+        x, y = _select_center_frame(x, y)
+
+        loss: Tensor | None = None
+
+        if self.opt is not None:
+            self.opt.zero_grad(set_to_none=True)
+
+        output, loss = self.adapt_step(x, y)
+
+        if loss is not None and self.opt is not None:
+            loss.backward()
+            self.opt.step()
+
+        output["y"] = y
+        return output
 
     def _get_regressor_weight(self) -> Tensor:
         regressor_module = getattr(self.net, "regressor", None)

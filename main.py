@@ -7,11 +7,11 @@ import itertools
 import yaml
 
 import torch
-import vbll
 from torch.utils.data import DataLoader
 from ignite.engine import Events
 
 from utils.seed import fix_seed
+from utils.viz_label_stream import visualize_label_stream
 from models.arch import create_regressor, Regressor, extract_bn_layers, extract_gn_layers
 from data import get_datasets, get_non_iid_dataset
 from data.image_utils import ImageSubset
@@ -19,56 +19,12 @@ from evaluation.evaluator import RegressionEvaluator
 from evaluation.four_seasons_eval import (
     collate_first_two,
     evaluate_four_seasons,
-    evaluate_four_seasons_online,
     FourSeasonsOnlineTracker,
 )
 from methods import (
-    VarianceMinimizationEM,
-    SignificantSubspaceAlignment,
-    WeightedSignificantSubspaceAlignment,
-    AdaptiveBatchNorm,
-    AdaptiveSSA,
-    ER_SSA,
-    Mem_SSA,
+    SSA,
+    RS_SSA,
 )
-
-
-def load_vbll_head(config: dict[str, Any], regressor: Regressor) -> torch.nn.Module:
-    vbll_cfg = config.get("tta", {}).get("vbll_head", {}) or {}
-    ckpt_path = vbll_cfg.get("path")
-    if ckpt_path is None:
-        raise ValueError("vbll_head path is not specified in config")
-    ckpt = Path(ckpt_path)
-
-    state_dict = torch.load(ckpt, map_location="cpu")
-
-    reg_layer = regressor.get_regressor()
-    in_features = vbll_cfg.get("in_features")
-    out_features = vbll_cfg.get("out_features")
-
-
-    reg_weight = vbll_cfg.get("regularization_weight")
-    if reg_weight is None:
-        trainset_size = vbll_cfg.get("trainset_size")
-        reg_weight = 1.0 / trainset_size if trainset_size else 1.0
-
-    prior_scale = vbll_cfg.get("prior_scale", 1.0)
-    wishart_scale = vbll_cfg.get("wishart_scale", 0.1)
-
-    vbll_head = vbll.Regression(
-        in_features=in_features,
-        out_features=out_features,
-        regularization_weight=reg_weight,
-        prior_scale=prior_scale,
-        wishart_scale=wishart_scale,
-    )
-    vbll_head.load_state_dict(state_dict)
-    vbll_head.eval()
-    for param in vbll_head.parameters():
-        param.requires_grad_(False)
-    return vbll_head
-
-
 
 
 def parse_args():
@@ -150,10 +106,6 @@ def main(args):
     seed_label = f"seed{args.seed}"
     if dataset_name == "utkface":
         output_dir = Path(args.o, stream_label, dataset_dir, f"{backbone}-{method_name}", seed_label)
-    elif dataset_name == "biwi_kinect":
-        gender = config["dataset"]["config"].get("gender")
-        person_id = config["dataset"]["config"].get("person")
-        output_dir = Path(args.o, dataset_dir, gender, person_id, f"{backbone}-{method_name}", seed_label)
     elif dataset_name == "4seasons":
         scene = config["dataset"]["config"].get("scene", "unknown")
         seq_name = config["dataset"]["config"].get("seqs", "unknown")[0]
@@ -196,18 +148,6 @@ def main(args):
 
     if method_key == "base":
         pass
-    elif method_key == "vm":
-        opt = create_optimizer(regressor, config)
-        vbll_head = load_vbll_head(config, regressor)
-        variance_weight = tta_cfg.get("variance_weight", 1.0)
-
-        engine = VarianceMinimizationEM(
-            regressor,
-            opt,
-            vbll_head=vbll_head,
-            variance_weight=variance_weight,
-            **trainer_cfg,
-        )
     elif method_key == "ssa":
         opt = create_optimizer(regressor, config)
         ssa_kwargs = {
@@ -216,53 +156,15 @@ def main(args):
             "weight_bias": tta_cfg.get("weight_bias", 1e-6),
             "weight_exp": tta_cfg.get("weight_exp", 1.0),
         }
-        engine = SignificantSubspaceAlignment(
+        engine = SSA(
             regressor,
             opt,
             **trainer_cfg,
             **ssa_kwargs,
         )
-    elif method_key == "adabn":
-        engine = AdaptiveBatchNorm(
-            regressor,
-            None,
-            **trainer_cfg,
-        )
-    elif method_key == "wssa":
+    elif method_key == "rs_ssa":
         opt = create_optimizer(regressor, config)
-        wssa_kwargs = {
-            "pc_config": tta_cfg.get("pc_config"),
-            "loss_config": tta_cfg.get("loss_config"),
-            "weight_bias": tta_cfg.get("weight_bias", 1e-6),
-            "weight_exp": tta_cfg.get("weight_exp", 1.0),
-            "temperature": tta_cfg.get("temperature", 1.0),
-        }
-        engine = WeightedSignificantSubspaceAlignment(
-            regressor,
-            opt,
-            **trainer_cfg,
-            **wssa_kwargs,
-        )
-    elif method_key == "ada_ssa":
-        opt = create_optimizer(regressor, config)
-        ada_kwargs = {
-            "ema_alpha": tta_cfg.get("ema_alpha", 0.1),
-            "base_ssa_weight": tta_cfg.get("base_ssa_weight", 0.0),
-            "max_ssa_weight": tta_cfg.get("max_ssa_weight", 1.0),
-            "ssa_growth_rate": tta_cfg.get("ssa_growth_rate", 0.1),
-            "t_threshold": tta_cfg.get("t_threshold", 3.0),
-            "alpha_batch": tta_cfg.get("alpha_batch", 0.5),
-            "pc_config": tta_cfg.get("pc_config"),
-        }
-        engine = AdaptiveSSA(
-            regressor,
-            opt,
-            **trainer_cfg,
-            **ada_kwargs,
-        )
-    elif method_key == "er_ssa":
-        opt = create_optimizer(regressor, config)
-        er_kwargs = {
+        rs_kwargs = {
             "pc_config": tta_cfg.get("pc_config"),
             "buffer_size": tta_cfg.get("buffer_size", 32),
             "min_buffer_size": tta_cfg.get("min_buffer_size", 1),
@@ -270,35 +172,15 @@ def main(args):
             "ema_alpha": tta_cfg.get("ema_alpha", 0.1),
             "ema_momentum": tta_cfg.get("ema_momentum", 0.99),
         }
-        engine = ER_SSA(
+        engine = RS_SSA(
             regressor,
             opt,
             **trainer_cfg,
-            **er_kwargs,
-        )
-    elif method_key == "mem_ssa":
-        opt = create_optimizer(regressor, config)
-        mem_kwargs = {
-            "pc_config": tta_cfg.get("pc_config"),
-            "buffer_size": tta_cfg.get("buffer_size", 512),
-            "min_buffer_size": tta_cfg.get("min_buffer_size", 1),
-            "stats_buffer_size": tta_cfg.get("stats_buffer_size", 128),
-            "membn_gamma": tta_cfg.get("membn_gamma", 0.3),
-            "ssa_weight": tta_cfg.get("ssa_weight", 1.0),
-            "ema_momentum": tta_cfg.get("ema_momentum", 0.99),
-            "weight_bias": tta_cfg.get("weight_bias", 1.0),
-            "weight_exp": tta_cfg.get("weight_exp", 1.0),
-            "debug": tta_cfg.get("debug", False),
-        }
-        engine = Mem_SSA(
-            regressor,
-            opt,
-            **trainer_cfg,
-            **mem_kwargs,
+            **rs_kwargs,
         )
     else:
         raise ValueError(
-            f"Unsupported TTA method: {raw_method!r}. Supported: 'base', 'vm', 'ssa', 'wssa', 'adabn', 'ada_ssa', 'er_ssa'."
+            f"Unsupported TTA method: {raw_method!r}. Supported: 'base', 'vm', 'ssa', 'wssa', 'adabn', 'ada_ssa', 'rs_ssa'."
         )
 
     if args.save:
@@ -339,10 +221,10 @@ def main(args):
         # online-style eval during adaptation (uses tracker if available)
         if tracker is not None:
             online_eval_metrics = tracker.compute(fig_path=online_fig)
-        else:
-            online_eval_metrics = evaluate_four_seasons_online(
-                regressor, val_dl, config["dataset"]["config"], fig_path=online_fig
-            )
+        # else:
+        #     online_eval_metrics = evaluate_four_seasons_online(
+        #         regressor, val_dl, config["dataset"]["config"], fig_path=online_fig
+        #     )
         # offline-style eval (full pass, aggregate)
         offline_metrics = evaluate_four_seasons(
             regressor, val_dl, config["dataset"]["config"], fig_path=offline_fig
@@ -386,82 +268,6 @@ def create_optimizer(net: Regressor, config: dict[str, Any]) -> torch.optim.Opti
     opt = eval(f"torch.optim.{config['optimizer']['name']}")(
         params, **config["optimizer"]["config"])
     return opt
-
-
-def visualize_label_stream(dataloader: DataLoader, output_path: Path) -> None:
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError as err:  # pragma: no cover - optional dependency
-        print(f"matplotlib is required for --viz-label-stream but not found: {err}")
-        return
-
-    labels: list[torch.Tensor] = []
-    for _, y in dataloader:
-        if isinstance(y, torch.Tensor):
-            y_tensor = y.detach().cpu()
-        else:
-            y_tensor = torch.as_tensor(y).cpu()
-        labels.append(y_tensor.float())
-
-    if not labels:
-        print("No labels available to visualize.")
-        return
-
-    label_tensor = torch.cat(labels, dim=0).float()
-    if label_tensor.ndim == 1:
-        label_tensor = label_tensor.unsqueeze(1)
-    elif label_tensor.ndim > 2:
-        label_tensor = label_tensor.view(label_tensor.shape[0], -1)
-
-    num_dims = label_tensor.shape[1]
-    idx_np = torch.arange(label_tensor.shape[0]).numpy()
-    label_np = label_tensor.numpy()
-
-    if num_dims == 1:
-        bins = min(50, max(10, label_tensor.numel() // 10))
-        fig, axes = plt.subplots(
-            2,
-            1,
-            figsize=(10, 6),
-            sharex=False,
-            gridspec_kw={"height_ratios": (2, 1)},
-        )
-        axes[0].plot(idx_np, label_np[:, 0], linewidth=0.8)
-        axes[0].set_ylabel("Label")
-        axes[0].set_xlabel("Time")
-        axes[0].set_title("Validation label stream (order of appearance)")
-        axes[0].grid(alpha=0.3, linestyle="--", linewidth=0.5)
-
-        axes[1].hist(label_np[:, 0], bins=bins, color="tab:orange", edgecolor="black", linewidth=0.5)
-        axes[1].set_xlabel("Label")
-        axes[1].set_ylabel("Count")
-        axes[1].set_title("Label distribution")
-        axes[1].grid(alpha=0.3, linestyle="--", linewidth=0.5)
-    else:
-        bins = min(50, max(10, label_tensor.shape[0] // 10))
-        fig, axes = plt.subplots(
-            num_dims,
-            2,
-            figsize=(12, 3 * num_dims),
-            sharex=False,
-        )
-        for dim in range(num_dims):
-            axes[dim, 0].plot(idx_np, label_np[:, dim], linewidth=0.8)
-            axes[dim, 0].set_ylabel(f"Label[{dim}]")
-            axes[dim, 0].set_xlabel("Time")
-            axes[dim, 0].set_title(f"Validation label stream dim {dim}")
-            axes[dim, 0].grid(alpha=0.3, linestyle="--", linewidth=0.5)
-
-            axes[dim, 1].hist(label_np[:, dim], bins=bins, color="tab:orange", edgecolor="black", linewidth=0.5)
-            axes[dim, 1].set_xlabel(f"Label[{dim}]")
-            axes[dim, 1].set_ylabel("Count")
-            axes[dim, 1].set_title(f"Label[{dim}] distribution")
-            axes[dim, 1].grid(alpha=0.3, linestyle="--", linewidth=0.5)
-
-    fig.tight_layout()
-    fig.savefig(output_path, dpi=200)
-    plt.close(fig)
-    print(f"Saved label stream visualization to {output_path}")
 
 
 if __name__ == "__main__":

@@ -90,7 +90,18 @@ class RegressionEvaluator(Engine):
                   batch: tuple[Tensor, Tensor]) -> dict[str, Tensor]:
         self.net.eval()
 
-        x, y = batch
+        # OLD:
+        # x, y = batch
+        # x = x.cuda()
+        # y = y.float().cuda()
+
+        x = batch[0]
+        y = batch[1]
+        if x.dim() == 5:
+            b, l, c, h, w = x.shape
+            x = x.view(b * l, c, h, w)
+            y = y.view(b * l, -1)
+
         x = x.cuda()
         y = y.float().cuda()
 

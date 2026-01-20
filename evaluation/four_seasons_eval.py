@@ -89,7 +89,15 @@ def evaluate_four_seasons(
     device = next(regressor.parameters()).device
     with torch.no_grad():
         for batch in dataloader:
+            # OLD:
+            # x, y = batch[0], batch[1]
+            # x = x.to(device)
+            # y = y.cpu().numpy()
             x, y = batch[0], batch[1]
+            if x.dim() == 5:
+                center = x.shape[1] // 2
+                x = x[:, center, :, :, :]
+                y = y[:, center, :]
             x = x.to(device)
             y = y.cpu().numpy()
 
@@ -123,36 +131,34 @@ def evaluate_four_seasons(
     }
 
 
-def evaluate_four_seasons_online(
+def evaluate_four_seasons_epoch(
     regressor: torch.nn.Module,
     dataloader: torch.utils.data.DataLoader,
     ds_cfg: dict[str, Any],
-    fig_path: str | Path | None = None,
-) -> dict[str, Any]:
-    """
-    Streaming-style evaluation (single pass, no extra optimizer steps).
-    Can be called after TTA to get per-sample error traces (model fixed).
-    """
+    epoch: int,
+    output_dir: str | Path,
+) -> dict[str, float]:
     regressor.eval()
     scene = ds_cfg.get("scene", "neighborhood")
     base = ds_cfg.get("data_path", "data/4Seasons")
-    dataset_name = ds_cfg.get("dataset", "4Seasons")
-    pose_stats_file = resolve_stats_path(base, dataset_name, scene, "pose_stats.txt")
+    pose_stats_file = Path(base) / "4Seasons" / scene / "pose_stats.txt"
     pose_m, pose_s = np.loadtxt(pose_stats_file)
 
     pred_list, targ_list = [], []
     device = next(regressor.parameters()).device
-    t_loss_series: list[float] = []
-    q_loss_series: list[float] = []
-
     with torch.no_grad():
         for batch in dataloader:
             x, y = batch[0], batch[1]
+            if x.dim() == 5:
+                center = x.shape[1] // 2
+                x = x[:, center, :, :, :]
+                y = y[:, center, :]
+
             x = x.to(device)
             y_np = y.cpu().numpy()
 
-            feat = regressor.feature(x)  # type: ignore
-            out = regressor.predict_from_feature(feat).cpu().numpy()  # type: ignore
+            feat = regressor.feature(x)  # type: ignore[attr-defined]
+            out = regressor.predict_from_feature(feat).cpu().numpy()  # type: ignore[attr-defined]
 
             q_out = np.asarray([qexp(p[3:]) for p in out])
             q_targ = np.asarray([qexp(t[3:]) for t in y_np])
@@ -165,18 +171,20 @@ def evaluate_four_seasons_online(
             pred_list.append(out_full)
             targ_list.append(targ_full)
 
-            t_loss_batch = np.linalg.norm(out_full[:, :3] - targ_full[:, :3], axis=1)
-            q_loss_batch = np.asarray([quaternion_angular_error(p, t) for p, t in zip(out_full[:, 3:], targ_full[:, 3:])])
-            t_loss_series.extend(t_loss_batch.tolist())
-            q_loss_series.extend(q_loss_batch.tolist())
-
     pred = np.vstack(pred_list)
     targ = np.vstack(targ_list)
-    t_loss = np.asarray(t_loss_series)
-    q_loss = np.asarray(q_loss_series)
+    t_loss = np.linalg.norm(pred[:, :3] - targ[:, :3], axis=1)
+    q_loss = np.asarray([quaternion_angular_error(p, t) for p, t in zip(pred[:, 3:], targ[:, 3:])])
 
-    if fig_path is not None:
-        plot_four_seasons(pred, targ, t_loss, pose_m, pose_s, Path(fig_path))
+    output_dir = Path(output_dir)
+    poses_dir = output_dir / "output_poses"
+    poses_dir.mkdir(parents=True, exist_ok=True)
+    np.savetxt(poses_dir / f"ep{epoch}_pred.txt", pred, fmt="%8.8f")
+    np.savetxt(poses_dir / f"ep{epoch}_targ.txt", targ, fmt="%8.8f")
+
+    fig_dir = output_dir / "figures"
+    fig_path = fig_dir / f"{epoch}.png"
+    plot_four_seasons(pred, targ, t_loss, pose_m, pose_s, fig_path)
 
     return {
         "t_median": float(np.median(t_loss)),
@@ -184,6 +192,77 @@ def evaluate_four_seasons_online(
         "t_mean": float(np.mean(t_loss)),
         "q_mean": float(np.mean(q_loss)),
     }
+
+
+# def evaluate_four_seasons_online(
+#     regressor: torch.nn.Module,
+#     dataloader: torch.utils.data.DataLoader,
+#     ds_cfg: dict[str, Any],
+#     fig_path: str | Path | None = None,
+# ) -> dict[str, Any]:
+#     """
+#     Streaming-style evaluation (single pass, no extra optimizer steps).
+#     Can be called after TTA to get per-sample error traces (model fixed).
+#     """
+#     regressor.eval()
+#     scene = ds_cfg.get("scene", "neighborhood")
+#     base = ds_cfg.get("data_path", "data/4Seasons")
+#     dataset_name = ds_cfg.get("dataset", "4Seasons")
+#     pose_stats_file = resolve_stats_path(base, dataset_name, scene, "pose_stats.txt")
+#     pose_m, pose_s = np.loadtxt(pose_stats_file)
+
+#     pred_list, targ_list = [], []
+#     device = next(regressor.parameters()).device
+#     t_loss_series: list[float] = []
+#     q_loss_series: list[float] = []
+
+#     with torch.no_grad():
+#         for batch in dataloader:
+#             # OLD:
+#             # x, y = batch[0], batch[1]
+#             # x = x.to(device)
+#             # y_np = y.cpu().numpy()
+#             x, y = batch[0], batch[1]
+#             if x.dim() == 5:
+#                 center = x.shape[1] // 2
+#                 x = x[:, center, :, :, :]
+#                 y = y[:, center, :]
+#             x = x.to(device)
+#             y_np = y.cpu().numpy()
+
+#             feat = regressor.feature(x)  # type: ignore
+#             out = regressor.predict_from_feature(feat).cpu().numpy()  # type: ignore
+
+#             q_out = np.asarray([qexp(p[3:]) for p in out])
+#             q_targ = np.asarray([qexp(t[3:]) for t in y_np])
+#             out_full = np.hstack((out[:, :3], q_out))
+#             targ_full = np.hstack((y_np[:, :3], q_targ))
+
+#             out_full[:, :3] = (out_full[:, :3] * pose_s) + pose_m
+#             targ_full[:, :3] = (targ_full[:, :3] * pose_s) + pose_m
+
+#             pred_list.append(out_full)
+#             targ_list.append(targ_full)
+
+#             t_loss_batch = np.linalg.norm(out_full[:, :3] - targ_full[:, :3], axis=1)
+#             q_loss_batch = np.asarray([quaternion_angular_error(p, t) for p, t in zip(out_full[:, 3:], targ_full[:, 3:])])
+#             t_loss_series.extend(t_loss_batch.tolist())
+#             q_loss_series.extend(q_loss_batch.tolist())
+
+#     pred = np.vstack(pred_list)
+#     targ = np.vstack(targ_list)
+#     t_loss = np.asarray(t_loss_series)
+#     q_loss = np.asarray(q_loss_series)
+
+#     if fig_path is not None:
+#         plot_four_seasons(pred, targ, t_loss, pose_m, pose_s, Path(fig_path))
+
+#     return {
+#         "t_median": float(np.median(t_loss)),
+#         "q_median": float(np.median(q_loss)),
+#         "t_mean": float(np.mean(t_loss)),
+#         "q_mean": float(np.mean(q_loss)),
+#     }
 
 
 class FourSeasonsOnlineTracker:

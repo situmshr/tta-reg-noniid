@@ -54,3 +54,37 @@ run_*.py
 # in progress files
 models/arch/VBLL.py
 data/seq_non_iid.py
+
+
+# ignore files for refactoring
+save_encoder_features.py
+weighted_valid_feature_stats.py
+train_vbll.py
+models/tta_features
+models/tta_weights
+methods/ada_ssa.py
+methods/adabn.py
+methods/mem_ssa.py
+methods/pa_ssa.py
+methods/vm.py
+methods/wssa.py
+scripts/
+data/biwi_kinect.py
+configs/train_source/biwi_*
+configs/train_vbll
+configs/tta/biwi_kinect/
+configs/tta/utkface/utkface-iid-*.yaml
+configs/tta/utkface/utkface-*-Res50-BN-*.yaml
+configs/tta/utkface/utkface-non_iid-Res50-GN-*-Lv1.yaml
+configs/tta/utkface/utkface-non_iid-Res50-GN-*-Lv2.yaml
+configs/tta/utkface/utkface-non_iid-Res50-GN-*-Lv3.yaml
+configs/tta/utkface/utkface-non_iid-Res50-GN-*-Lv4.yaml
+configs/tta/utkface/utkface-non_iid-Res50-GN-ada_ssa-Lv5.yaml
+configs/tta/utkface/utkface-non_iid-Res50-GN-mem_ssa-Lv5.yaml
+configs/tta/utkface/utkface-non_iid-Res50-GN-vm-Lv5.yaml
+configs/tta/utkface/utkface-non_iid-Res50-GN-wssa-Lv5.yaml
+configs/valid_features/
+configs/vbll
+configs/weighted_valid_feature_stats
+configs/biwi-kinect_female_val_indices.npy
+configs/biwi-kinect_male_val_indices.npy

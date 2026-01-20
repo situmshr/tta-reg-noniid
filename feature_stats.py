@@ -116,6 +116,14 @@ class FeatureStatCalculator(Engine):
 
         # Some datasets may return (x, y, *extras); we only need the first two.
         x, y = batch[0], batch[1]
+        if x.dim() == 5:
+            # Use the center frame to reduce [B,L,C,H,W] -> [B,C,H,W].
+            # Exclude non-center frames since they overlap; all samples are still evaluated.
+            seq_len = x.size(1)
+            center = seq_len // 2
+            x = x[:, center]
+            if y.dim() == 3 and y.size(1) == seq_len:
+                y = y[:, center]
         x = x.cuda()
 
         feat = self.regressor_feature(x)    # (B,D)
