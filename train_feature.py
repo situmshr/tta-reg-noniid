@@ -12,6 +12,7 @@ import yaml
 
 from data import get_datasets
 from models.arch import create_regressor, Regressor
+from utils.config_process import load_config
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,11 +22,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-o", default="models/train_features",
                         help="directory to store features")
     return parser.parse_args()
-
-
-def load_config(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f) if path.endswith(".json") else yaml.safe_load(f)
 
 
 def build_loader(config: dict) -> DataLoader:
@@ -40,6 +36,7 @@ class FeatureCalculator(Engine):
     compile_model: InitVar[dict | None]
 
     def __post_init__(self, compile_model: dict | None):
+        # Register inference to the loop
         super().__init__(self.inference)
 
         if compile_model is None:
@@ -70,8 +67,6 @@ class FeatureCalculator(Engine):
         self._labels.append(y.cpu())
 
     def get_feats(self, ddof: int = 1) -> tuple[torch.Tensor, torch.Tensor]:
-        assert len(self._features) >= 1, "no data accumulated"
-
         features = torch.cat(self._features)
         labels = torch.cat(self._labels)
 

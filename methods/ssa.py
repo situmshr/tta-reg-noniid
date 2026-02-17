@@ -110,13 +110,13 @@ class SSA(BaseTTA):
         if self.opt is not None:
             self.opt.zero_grad(set_to_none=True)
 
-        output, loss = self.adapt_step(x, y)
+        output, loss = self.adapt_step(x, y) # type: ignore
 
         if loss is not None and self.opt is not None:
             loss.backward()
             self.opt.step()
 
-        output["y"] = y
+        output["y"] = y # type: ignore
         return output
 
     def _get_regressor_weight(self) -> Tensor:

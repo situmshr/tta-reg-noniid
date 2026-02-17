@@ -221,10 +221,6 @@ def main(args):
         # online-style eval during adaptation (uses tracker if available)
         if tracker is not None:
             online_eval_metrics = tracker.compute(fig_path=online_fig)
-        # else:
-        #     online_eval_metrics = evaluate_four_seasons_online(
-        #         regressor, val_dl, config["dataset"]["config"], fig_path=online_fig
-        #     )
         # offline-style eval (full pass, aggregate)
         offline_metrics = evaluate_four_seasons(
             regressor, val_dl, config["dataset"]["config"], fig_path=offline_fig

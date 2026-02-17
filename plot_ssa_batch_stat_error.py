@@ -345,7 +345,7 @@ def plot_histograms(
         alpha=0.6,
         label="non-stationary",
     )
-    axes[0].set_title("mean")
+    axes[0].set_title(r"Mean Error:$||\tilde{\boldsymbol{\mu}}^{t} - \tilde{\boldsymbol{\mu}}^{s}||_2$")
     axes[0].set_xlabel(f"{metric_label} error")
     axes[0].set_ylabel("sample count")
     axes[0].grid(True, alpha=0.25)
@@ -367,7 +367,7 @@ def plot_histograms(
         alpha=0.6,
         label="non-stationary",
     )
-    axes[1].set_title("variance")
+    axes[1].set_title(r"Variance Error:$||(\tilde{\boldsymbol{\sigma}}^{t})^{2} - (\tilde{\boldsymbol{\sigma}}^{s})^{2}||_2$")
     axes[1].set_xlabel(f"{metric_label} error")
     axes[1].grid(True, alpha=0.25)
     axes[1].legend()
@@ -396,14 +396,14 @@ def plot_time_series(
 
     axes[0].plot(t_state, state_mean, color="#4C72B0", linewidth=1.5, label="stationary")
     axes[0].plot(t_non, non_mean, color="#DD8452", linewidth=1.5, label="non-stationary")
-    axes[0].set_title("mean")
+    axes[0].set_title(r"Mean Error:$||\tilde{\boldsymbol{\mu}}^{t} - \tilde{\boldsymbol{\mu}}^{s}||_2$")
     axes[0].set_ylabel(f"{metric_label} error")
     axes[0].grid(True, alpha=0.25)
     axes[0].legend()
 
     axes[1].plot(t_state, state_var, color="#4C72B0", linewidth=1.5, label="stationary")
     axes[1].plot(t_non, non_var, color="#DD8452", linewidth=1.5, label="non-stationary")
-    axes[1].set_title("variance")
+    axes[1].set_title(r"Variance Error:$||(\tilde{\boldsymbol{\sigma}}^{t})^{2} - (\tilde{\boldsymbol{\sigma}}^{s})^{2}||_2$")
     axes[1].set_xlabel("Time")
     axes[1].set_ylabel(f"{metric_label} error")
     axes[1].grid(True, alpha=0.25)

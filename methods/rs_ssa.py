@@ -188,14 +188,14 @@ class RS_SSA(BaseTTA):
 
         if self.opt: self.opt.zero_grad(set_to_none=True)
         
-        out, loss = self.adapt_step(x, y)
+        out, loss = self.adapt_step(x, y) # type: ignore
 
         if self.opt and loss is not None:
             loss.backward()
             self.opt.step()
             ema_update(self.net, self.source_net, self.ema_momentum) # type: ignore
 
-        out["y"] = y
+        out["y"] = y # type: ignore
         return out
 
     @torch.no_grad()

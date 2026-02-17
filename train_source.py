@@ -1,16 +1,11 @@
 from typing import Any
-import json
 from pathlib import Path
 from pprint import pprint
 import copy
-import sys
 import argparse
 import os
 
-import yaml
-
 import torch
-import numpy as np
 import matplotlib
 from torch import nn
 from torch.optim import Optimizer
@@ -19,7 +14,6 @@ from ignite.engine.events import Events
 from ignite.handlers.param_scheduler import (CosineAnnealingScheduler,
                                              create_lr_scheduler_with_warmup)
 from ignite.handlers.checkpoint import ModelCheckpoint
-from ignite.metrics import Average
 import wandb
 
 from data import get_datasets
@@ -30,6 +24,7 @@ from evaluation.evaluator import RegressionEvaluator
 from handlers import EvaluationAccumulator, EvaluationRunner, make_run_val_epoch
 from utils.atloc_loss import AtLocCriterion, AtLocPlusCriterion
 from utils.seed import fix_seed
+from utils.config_process import load_config, save_config, resolve_path_from_config
 
 DISPLAY = "DISPLAY" in os.environ
 if not DISPLAY:
@@ -71,23 +66,11 @@ def parse_args():
 
 
 def main(args):
-    with open(args.c, "r", encoding="utf-8") as f:
-        if args.c.endswith(".json"):
-            config = json.load(f)
-        else:
-            config = yaml.safe_load(f)
-    pprint(config)
-    sys.stdout.flush()
+    config = load_config(args.c)
+    run_dir, train_dir, val_dir, model_dir = resolve_path_from_config(config, args.o)
+    save_config(config, args.o)
 
-    # save config in structured (dataset/scene) directory
-    dataset_name = config["dataset"]["name"]
-    scene = config["dataset"]["config"].get("scene")
-    run_dir = Path(args.o) / dataset_name
-    if scene is not None:
-        run_dir = run_dir / scene
-    run_dir.mkdir(parents=True, exist_ok=True)
-    with (run_dir / "config.yaml").open("w", encoding="utf-8") as f:
-        yaml.dump(config, f)
+    fix_seed(args.seed)
 
     wandb.init(
         project="tta-reg-train-source",
@@ -95,8 +78,6 @@ def main(args):
         config=config,
         dir=str(run_dir),
     )
-
-    fix_seed(args.seed)
 
     net = create_regressor(config).cuda()
 
@@ -118,23 +99,21 @@ def main(args):
 
     train_ev_logger = EvaluationAccumulator()
     train_ev_runner = EvaluationRunner(
-        trainer, train_dl, "train_" + dataset_name, train_ev_logger, run_evaluator=False
+        trainer, train_dl, train_dir, train_ev_logger, run_evaluator=False
     )
 
-    ds_targets = (config.get("dataset", {}).get("config", {}) or {}).get("target")
     eval_cfg = dict(config["evaluator"])
     eval_cfg.setdefault("val_dataset", val_ds)
-    if ds_targets is not None:
-        eval_cfg.setdefault("target_names", ds_targets)
     evaluator = RegressionEvaluator(net, **eval_cfg)
 
     val_ev_logger = EvaluationAccumulator()
     val_ev_runner = EvaluationRunner(
-        evaluator, val_dl, "val_" + dataset_name, val_ev_logger)
-    
+        evaluator, val_dl, val_dir, val_ev_logger
+    )
+
     trainer.add_event_handler(Events.EPOCH_COMPLETED, train_ev_runner)
 
-    is_four_seasons = dataset_name == "4seasons"
+    is_four_seasons = config["dataset"]["name"] == "4seasons"
 
     run_val_epoch = make_run_val_epoch(
         val_ev_runner,
@@ -147,23 +126,15 @@ def main(args):
 
     trainer.add_event_handler(Events.EPOCH_COMPLETED, run_val_epoch)
 
-    model_dir = Path("models/weights", dataset_name)
-    gender = config["dataset"]["config"].get("gender")
-    if gender is not None:
-        model_dir = model_dir / gender
-    if scene is not None:
-        model_dir = model_dir / scene
-
     trainer.add_event_handler(Events.COMPLETED,
                               ModelCheckpoint(dirname=model_dir, require_empty=False,
                                               filename_prefix=config["regressor"]["config"]["backbone"]),
                               {"model": net})
 
-    p = run_dir
     trainer.add_event_handler(Events.COMPLETED,
-                              lambda _: val_ev_logger.get_dataframe().to_csv(str(p / "val_metrics.csv"), index=False))
+                              lambda _: val_ev_logger.get_dataframe().to_csv(str(run_dir / "val_metrics.csv"), index=False))
     trainer.add_event_handler(Events.COMPLETED,
-                              lambda _: train_ev_logger.get_dataframe().to_csv(str(p / "train_metrics.csv"), index=False))
+                              lambda _: train_ev_logger.get_dataframe().to_csv(str(run_dir / "train_metrics.csv"), index=False))
     trainer.run(train_dl, max_epochs=config["epoch"])
 
     wandb.finish()
@@ -191,7 +162,7 @@ def create_optimizer(
             if isinstance(p_attr, nn.Parameter) and p_attr.requires_grad:
                 loss_params.append(p_attr)
         if loss_params:
-            param_groups.append({"params": loss_params})
+            param_groups.append({"params": loss_params}) # type: ignore
 
     opt = eval(f"torch.optim.{config['optimizer']['name']}")(
         param_groups, **config["optimizer"]["config"])

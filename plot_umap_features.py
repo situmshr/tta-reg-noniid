@@ -62,7 +62,7 @@ DISPLAY_METHOD_LABELS = {
     "base": "Source",
     "ssa": "SSA",
     "er_ssa": "RS-SSA",
-    SSA_OFFLINE_LABEL: "SSA(Offline)",
+    SSA_OFFLINE_LABEL: "SSA(stationary)",
 }
 NEIGHBORHOOD_RE = re.compile(r"^neighborhood_\d+$")
 LAYOUT_RE = re.compile(r"^\s*(\d+)\s*[xX]\s*(\d+)\s*$")
@@ -397,7 +397,7 @@ def plot_source_target(
     ax.scatter(target_emb[:, 0], target_emb[:, 1], s=args.point_size, alpha=args.alpha, label="target")
     ax.set_xlabel("UMAP-1")
     ax.set_ylabel("UMAP-2")
-    ax.set_title(title)
+    ax.set_title(title, fontsize=28)
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
     if not args.no_legend:
