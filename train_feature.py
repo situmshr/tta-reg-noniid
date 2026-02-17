@@ -9,7 +9,7 @@ from ignite.engine import Engine
 
 from data import get_datasets
 from models.arch import create_regressor, Regressor
-from utils.config_process import load_config, resolve_path_from_config
+from utils.config_process import load_config, resolve_train_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -89,7 +89,7 @@ def main() -> None:
     labels = labels.view(labels.size(0), -1)
     feat_labels = torch.cat([features, labels], dim=1)
 
-    out_dir, _, _, _ = resolve_path_from_config(config, args.o)
+    out_dir, _, _, _ = resolve_train_dir(config, args.o)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{config['regressor']['config']['backbone']}.pt"

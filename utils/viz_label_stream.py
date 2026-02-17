@@ -1,14 +1,9 @@
 import torch
 from torch.utils.data import DataLoader
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 def visualize_label_stream(dataloader: DataLoader, output_path: Path) -> None:
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError as err:  # pragma: no cover - optional dependency
-        print(f"matplotlib is required for --viz-label-stream but not found: {err}")
-        return
-
     labels: list[torch.Tensor] = []
     for _, y in dataloader:
         if isinstance(y, torch.Tensor):

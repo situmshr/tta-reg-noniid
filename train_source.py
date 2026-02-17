@@ -24,7 +24,7 @@ from evaluation.evaluator import RegressionEvaluator
 from handlers import EvaluationAccumulator, EvaluationRunner, make_run_val_epoch
 from utils.atloc_loss import AtLocCriterion, AtLocPlusCriterion
 from utils.seed import fix_seed
-from utils.config_process import load_config, save_config, resolve_path_from_config
+from utils.config_process import load_config, save_config, resolve_train_dir
 
 DISPLAY = "DISPLAY" in os.environ
 if not DISPLAY:
@@ -67,7 +67,7 @@ def parse_args():
 
 def main(args):
     config = load_config(args.c)
-    run_dir, train_dir, val_dir, model_dir = resolve_path_from_config(config, args.o)
+    run_dir, train_dir, val_dir, model_dir = resolve_train_dir(config, args.o)
     save_config(config, args.o)
 
     fix_seed(args.seed)
