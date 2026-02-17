@@ -1,18 +1,15 @@
 from dataclasses import dataclass, InitVar
 
 import argparse
-import json
 from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
 from ignite.engine import Engine
 
-import yaml
-
 from data import get_datasets
 from models.arch import create_regressor, Regressor
-from utils.config_process import load_config
+from utils.config_process import load_config, resolve_path_from_config
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,10 +53,16 @@ class FeatureCalculator(Engine):
         self._labels = []
 
     @torch.no_grad()
-    def inference(self, engine: Engine, batch: tuple[torch.Tensor, torch.Tensor]):
+    def inference(self, engine: Engine, batch: tuple):
         self.regressor.eval()
 
-        x, y = batch
+        x, y = batch[0], batch[1]
+
+        # 5D Input (B, L, C, H, W) -> 4D (B*L, C, H, W) for 4Seasons dataset
+        if x.dim() == 5:
+            b, l, c, h, w = x.shape
+            x = x.view(b * l, c, h, w)
+
         x = x.cuda()
 
         feat = self.regressor_feature(x)    # (B,D)
@@ -86,9 +89,7 @@ def main() -> None:
     labels = labels.view(labels.size(0), -1)
     feat_labels = torch.cat([features, labels], dim=1)
 
-    out_dir = Path(args.o, config["dataset"]["name"])
-    if config["dataset"]["config"].get("gender") is not None:
-        out_dir = out_dir / config["dataset"]["config"]["gender"]
+    out_dir, _, _, _ = resolve_path_from_config(config, args.o)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{config['regressor']['config']['backbone']}.pt"
