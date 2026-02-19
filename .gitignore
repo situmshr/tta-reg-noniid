@@ -88,3 +88,7 @@ configs/vbll
 configs/weighted_valid_feature_stats
 configs/biwi-kinect_female_val_indices.npy
 configs/biwi-kinect_male_val_indices.npy
+
+# allow tracked config files for UMAP plotting
+!configs/plot_umap_features/
+!configs/plot_umap_features/*.yaml

@@ -1,6 +1,10 @@
 import json
+import glob
+import re
 import yaml
 from pathlib import Path
+
+LAYOUT_RE = re.compile(r"^\s*(\d+)\s*[xX]\s*(\d+)\s*$")
 
 
 def load_config(path: str) -> dict:
@@ -106,6 +110,78 @@ def resolve_save_model_path(
     save_dir = Path("models", "tta_weights", save_subdir)
     save_dir.mkdir(parents=True, exist_ok=True)
     return save_dir / f"{backbone}_{method_key}.pt"
+
+
+# ---------------------------------------------------------------------------
+# File resolution (for feature / stats files)
+# ---------------------------------------------------------------------------
+
+def resolve_unique_file(root: Path, dataset: str, backbone: str) -> Path:
+    """Find exactly one ``<backbone>.pt`` under ``<root>/<dataset>/``."""
+    matches = sorted(glob.glob(str(root / dataset / "**" / f"{backbone}.pt"), recursive=True))
+    assert len(matches) == 1, f"Expected 1 file, found {len(matches)} under {root}/{dataset}/{backbone}"
+    return Path(matches[0])
+
+
+def resolve_tta_features(
+    root: Path, dataset: str, backbone: str, split: str, glob_pattern: str | None,
+) -> list[Path]:
+    """Glob TTA feature ``.pt`` files."""
+    if glob_pattern:
+        pattern = glob_pattern if Path(glob_pattern).is_absolute() else str(root / glob_pattern)
+    else:
+        pattern = str(root / "**" / f"{split}_features" / dataset / "**" / f"{backbone}.pt")
+    return [Path(p) for p in sorted(glob.glob(pattern, recursive=True))]
+
+
+def resolve_input_files(config: dict) -> tuple[Path, list[Path], Path]:
+    """Resolve train feature file, TTA feature files, and stat file from config.
+
+    Reads ``config["data"]`` section.
+    """
+    data_cfg = config.get("data") or {}
+    dataset = data_cfg["dataset"]
+    backbone = data_cfg["backbone"]
+    train_root = Path(data_cfg.get("train_root", "models/train_features"))
+    tta_root = Path(data_cfg.get("tta_root", "models/tta_features"))
+    stat_root = Path(data_cfg.get("stat_root", "models/stats"))
+    split = data_cfg.get("tta_split", "val")
+
+    train_file = Path(data_cfg["train_file"]) if data_cfg.get("train_file") else resolve_unique_file(train_root, dataset, backbone)
+    stat_file = Path(data_cfg["stat_file"]) if data_cfg.get("stat_file") else resolve_unique_file(stat_root, dataset, backbone)
+
+    if data_cfg.get("tta_files"):
+        tta_files = [Path(p) for p in data_cfg["tta_files"]]
+    else:
+        tta_files = resolve_tta_features(tta_root, dataset, backbone, split, data_cfg.get("tta_glob"))
+    assert tta_files, "No TTA feature files found."
+
+    return train_file, tta_files, stat_file
+
+def resolve_grid(plot_cfg: dict, nplots: int) -> tuple[int, int, Path]:
+    """Resolve grid layout and output path from plot config.
+
+    Returns:
+        (nrows, ncols, output_path)
+
+    If layout is specified (e.g. "2x2"), it is also appended to the output filename.
+        e.g. output="outputs/umap.png", layout="2x2" → outputs/umap_2x2.png
+    """
+    layout = plot_cfg.get("layout")
+    output = Path(plot_cfg.get("output", "outputs/umap_features.png"))
+
+    if layout is None:
+        return 1, nplots, output
+
+    m = LAYOUT_RE.match(layout)
+    assert m, f"layout must be ROWSxCOLS, got {layout!r}"
+    nrows, ncols = int(m.group(1)), int(m.group(2))
+    assert nrows * ncols == nplots, f"layout {nrows}x{ncols} != {nplots} plots"
+
+    suffix = layout.strip().lower().replace(" ", "")
+    output = output.with_name(f"{output.stem}_{suffix}{output.suffix or '.png'}")
+
+    return nrows, ncols, output
 
 
 # ---------------------------------------------------------------------------
