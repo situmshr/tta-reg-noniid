@@ -8,6 +8,8 @@ from torch import Tensor, nn
 from methods.base import BaseTTA
 from .utils import get_pca_basis, diagonal_gaussian_kl_loss
 
+from dataclasses import dataclass, field
+
 
 @torch.no_grad()
 def ema_update(model: nn.Module, source: nn.Module, momentum: float) -> None:
@@ -16,11 +18,6 @@ def ema_update(model: nn.Module, source: nn.Module, momentum: float) -> None:
     for p, src_p in zip(model.parameters(), source.parameters()):
         if p.requires_grad:
             p.data.lerp_(src_p.data, weight=1.0 - momentum)
-
-
-import torch
-from torch import Tensor
-from dataclasses import dataclass, field
 
 def _select_center_frame(x: Tensor, y: Tensor | None = None) -> tuple[Tensor, Tensor | None]:
     if x.dim() == 5:
