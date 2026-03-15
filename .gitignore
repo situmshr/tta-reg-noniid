@@ -92,3 +92,8 @@ configs/biwi-kinect_male_val_indices.npy
 # allow tracked config files for UMAP plotting
 !configs/plot_umap_features/
 !configs/plot_umap_features/*.yaml
+
+
+# ignore pdf files for paper
+fig/target_stream_order_cluster_blocks_representative_seed.pdf
+fig/ssa_rs_ssa_global_projected_subspace_stats_vs_source_subspace_reference_stats.pdf

@@ -17,7 +17,7 @@ plt.switch_backend("Agg")
 DEFAULT_LABEL_DIMS = {"utkface": 1, "4seasons": 6}
 FOURSEASONS_SEQS = ("neighborhood_4", "neighborhood_6", "neighborhood_7")
 FOURSEASONS_METHODS = ("base", "ssa", "rs_ssa")
-SSA_OFFLINE_LABEL = "ssa(offline)"
+SSA_OFFLINE_LABEL = "ssa(stationary)"
 DEFAULT_PLOT_METHODS = ("base", "ssa", "rs_ssa", SSA_OFFLINE_LABEL)
 KNOWN_METHODS = ("rs_ssa", "ssa", "base")
 DISPLAY_METHOD_LABELS = {
@@ -115,7 +115,8 @@ def group_by_corruption_and_method(paths: Sequence[Path], dataset: str | None) -
 def group_by_seq_and_method(paths: Sequence[Path], seqs: Sequence[str], methods: Sequence[str]) -> Dict[Tuple[str, str], List[Path]]:
     grouped: Dict[Tuple[str, str], List[Path]] = {(s, m): [] for s in seqs for m in methods}
     for p in paths:
-        seq, method = infer_sequence(p), infer_method(p)
+        seq = infer_sequence(p)
+        method = normalize_method_label(infer_method(p), infer_stream_type(p))
         if seq in seqs and method in methods:
             grouped[(seq, method)].append(p)  # type: ignore
     return grouped
@@ -302,11 +303,8 @@ def plot_corruption_grids(config: dict, tta_files, feature_dim, label_dim, reduc
                 plot_source_target(ax, source_emb, emb, plot_cfg, format_method_label(method), xlim, ylim)
 
         figure_title = f"{title} / {corruption}" if title else corruption
-        if len(set(c for c, _ in embeddings)) > 1:
-            safe = re.sub(r"[^\w.-]+", "_", corruption).strip("_") or "unknown"
-            out_path = output.with_name(f"{output.stem}_{safe}{output.suffix or '.png'}")
-        else:
-            out_path = output
+        safe = re.sub(r"[^\w.-]+", "_", corruption).strip("_") or "unknown"
+        out_path = output.with_name(f"{output.stem}_{safe}{output.suffix or '.png'}")
         save_figure(fig, out_path, figure_title, no_figure_title)
 
 
