@@ -39,9 +39,6 @@ texfiles/
 *.sh
 run_*.py
 
-# RADEME files
-*.md
-
 # log files
 *.log
 
