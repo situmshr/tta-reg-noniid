@@ -29,9 +29,11 @@ source .venv/bin/activate
 
 ### 3. データセットの配置
 - UTKFace: <https://www.kaggle.com/datasets/moritzm00/utkface-cropped>
-- 4Seasons: <https://cvg.cit.tum.de/data/datasets/4seasons-dataset/download>
+- 4Seasons: 本リポジトリでは，RobustLoc で案内されているリサイズ済みデータを使用します．  
+  RobustLoc: <https://github.com/sijieaaa/RobustLoc>  
+  Download: <https://drive.google.com/file/d/1H2ujRAd1v3reg31zDHoM1yBI0IUi1Ovz/view?usp=sharing>
 
-取得したデータを `data/` 配下の既存構成に合わせて配置してください．
+取得したデータは，`data/` 配下の既存ディレクトリ構成に合わせて配置してください．
 
 ### 4. Sourceモデルの学習（重み作成）
 `train_source.py` を `configs/train_source/` の設定で実行します．
