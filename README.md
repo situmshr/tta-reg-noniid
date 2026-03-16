@@ -2,7 +2,7 @@
 ## Abstract
 While deep regression models exhibit strong generalization, their performance often suffers in real-world deployment due to distribution shifts. Test-Time Adaptation (TTA) addresses this by adapting models using unlabeled test data during inference. Recently, Subspace Statistical Alignment (SSA) has emerged as a promising TTA method for regression, aligning features within a predictioncritical low-dimensional subspace. However, applied to non-stationary data streams, SSA struggles when label distributions shift or become locally biased; these fluctuations distort the estimated statistics, leading to unstable updates and performance degradation. To overcome this, we extend SSA with a Reservoir-Sampling-based replay buffer, an exponential moving average (EMA) of the alignment statistics to suppress statistical distortion, and Weight Ensemble to stabilize adaptation. These components work synergistically to stabilize adaptation against non-stationary label distributions.
 
-![non-stationary](fig/non-stational_distribution.pdf)
+![non-stationary](fig/non-stational_distribution.svg)
 
 ## TTA実行の流れ
 
